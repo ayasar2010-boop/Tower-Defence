@@ -1,0 +1,38 @@
+# Derlenmiş çıktılar
+game
+game.exe
+*.o
+*.obj
+*.out
+*.exe
+
+# Raylib / GCC geçici dosyaları
+*.d
+*.a
+*.so
+*.dll
+*.lib
+
+# Assets - büyük ikili dosyalar (isteğe bağlı)
+assets/*.wav
+assets/*.mp3
+assets/*.ogg
+assets/*.png
+assets/*.jpg
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# OS dosyaları
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Log dosyaları
+*.log
