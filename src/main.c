@@ -111,6 +111,7 @@ typedef struct {
     int       targetEnemyIndex;
     Color     color;
     bool      active;
+    float     flashTimer;  /* B04: ateş flash süresi */
 } Tower;
 
 typedef struct {
@@ -169,6 +170,11 @@ typedef struct {
     TowerType selectedTowerType;
     float     gameSpeed;
     bool      showGrid;
+
+    /* B01: sağ tık bağlam menüsü */
+    bool    contextMenuOpen;
+    int     contextMenuTowerIdx;
+    Vector2 contextMenuPos;
 } Game;
 
 /* ============================================================
@@ -206,6 +212,8 @@ void DrawPauseOverlay(Game *g);
 void DrawGameOver(Game *g);
 void DrawVictory(Game *g);
 void DrawGame(Game *g);
+void DrawContextMenu(Game *g);  /* B01 */
+void DrawPathArrows(Game *g);   /* B02 */
 
 /* Yardımcılar */
 float   Vec2Distance(Vector2 a, Vector2 b);
@@ -387,12 +395,13 @@ void InitWaves(Game *g) {
 /* Oyunu tamamen sıfırlar ve başlangıç durumuna getirir. */
 void InitGame(Game *g) {
     memset(g, 0, sizeof(Game));
-    g->gold              = STARTING_GOLD;
-    g->lives             = STARTING_LIVES;
-    g->gameSpeed         = 1.0f;
-    g->state             = STATE_MENU;
-    g->selectedTowerType = TOWER_BASIC;
-    g->showGrid          = true;
+    g->gold                  = STARTING_GOLD;
+    g->lives                 = STARTING_LIVES;
+    g->gameSpeed             = 1.0f;
+    g->state                 = STATE_MENU;
+    g->selectedTowerType     = TOWER_BASIC;
+    g->showGrid              = true;
+    g->contextMenuTowerIdx   = -1;
     InitMap(g);
     InitWaypoints(g);
     InitWaves(g);
@@ -561,6 +570,12 @@ void UpdateTowers(Game *g, float dt) {
         Tower *t = &g->towers[i];
         if (!t->active) continue;
 
+        /* B04: flash zamanlayıcısını azalt */
+        if (t->flashTimer > 0.0f) {
+            t->flashTimer -= dt;
+            if (t->flashTimer < 0.0f) t->flashTimer = 0.0f;
+        }
+
         /* Hedef seç */
         if (t->targetEnemyIndex >= 0) {
             Enemy *e = &g->enemies[t->targetEnemyIndex];
@@ -578,6 +593,7 @@ void UpdateTowers(Game *g, float dt) {
             t->rotation = atan2f(toTarget.y, toTarget.x) * RAD2DEG;
             CreateProjectile(g, t->position, t->targetEnemyIndex, t->damage, t->splashRadius, t->type);
             t->fireCooldown = 1.0f / t->fireRate;
+            t->flashTimer   = 0.1f;  /* B04 */
         }
     }
 }
@@ -624,22 +640,33 @@ void UpdateProjectiles(Game *g, float dt) {
                     }
                 }
                 SpawnParticles(g, p->position, ORANGE, 12, 120.0f, 0.5f);
+                /* Splash'tan ölen tüm düşmanları işle */
+                for (int j = 0; j < MAX_ENEMIES; j++) {
+                    Enemy *e = &g->enemies[j];
+                    if (!e->active || e->currentHp > 0.0f) continue;
+                    SpawnParticles(g, e->position, e->color, 10, 100.0f, 0.4f);
+                    int reward = KILL_REWARD;
+                    if (e->type == ENEMY_FAST) reward = (int)(KILL_REWARD * 1.2f);
+                    if (e->type == ENEMY_TANK) reward = (int)(KILL_REWARD * 2.0f);
+                    g->gold  += reward;
+                    g->score += reward * 2;
+                    g->enemiesKilled++;
+                    e->active = false;
+                }
             } else {
                 target->currentHp -= p->damage;
                 SpawnParticles(g, p->position, p->color, 5, 80.0f, 0.2f);
-            }
-
-            /* Öldü mü? */
-            if (target->currentHp <= 0.0f) {
-                SpawnParticles(g, target->position, target->color, 10, 100.0f, 0.4f);
-                /* Ödül tipi çarpanı */
-                int reward = KILL_REWARD;
-                if (target->type == ENEMY_FAST) reward = (int)(KILL_REWARD * 1.2f);
-                if (target->type == ENEMY_TANK) reward = (int)(KILL_REWARD * 2.0f);
-                g->gold += reward;
-                g->score += reward * 2;
-                g->enemiesKilled++;
-                target->active = false;
+                /* Öldü mü? */
+                if (target->currentHp <= 0.0f) {
+                    SpawnParticles(g, target->position, target->color, 10, 100.0f, 0.4f);
+                    int reward = KILL_REWARD;
+                    if (target->type == ENEMY_FAST) reward = (int)(KILL_REWARD * 1.2f);
+                    if (target->type == ENEMY_TANK) reward = (int)(KILL_REWARD * 2.0f);
+                    g->gold  += reward;
+                    g->score += reward * 2;
+                    g->enemiesKilled++;
+                    target->active = false;
+                }
             }
             p->active = false;
         }
@@ -735,67 +762,88 @@ void HandleInput(Game *g) {
     if (IsKeyPressed(KEY_G))
         g->showGrid = !g->showGrid;
 
-    /* Duraklat */
-    if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE))
+    /* Duraklat — bağlam menüsünü de kapat */
+    if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)) {
+        g->contextMenuOpen = false;
         g->state = STATE_PAUSED;
+    }
 
-    /* Sonraki dalgayı başlat (dalga bekleme durumunda) */
-    /* HandleInput sadece STATE_PLAYING'de çağrılır; WAVE_CLEAR'da bu satır işlemez */
-
-    /* Sol tık — kule yerleştir */
+    /* Sol tık — bağlam menüsü açıksa işle, değilse kule yerleştir */
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
         Vector2 mp = GetMousePosition();
-        int gx, gy;
-        if (WorldToGrid(mp, &gx, &gy) && CanPlaceTower(g, gx, gy)) {
-            /* Boş kule yuvası bul */
-            for (int i = 0; i < MAX_TOWERS; i++) {
-                if (g->towers[i].active) continue;
-                Tower *t = &g->towers[i];
-                memset(t, 0, sizeof(Tower));
-                t->gridX   = gx;
-                t->gridY   = gy;
-                t->position= GridToWorld(gx, gy);
-                t->type    = g->selectedTowerType;
-                t->level   = 1;
-                t->targetEnemyIndex = -1;
-                t->active  = true;
-                /* Tip özelliklerini ata */
-                switch (t->type) {
-                    case TOWER_BASIC:
-                        t->range=150; t->damage=20; t->fireRate=2.0f;
-                        t->splashRadius=0; t->color=BLUE; break;
-                    case TOWER_SNIPER:
-                        t->range=300; t->damage=80; t->fireRate=0.5f;
-                        t->splashRadius=0; t->color=DARKGREEN; break;
-                    case TOWER_SPLASH:
-                        t->range=120; t->damage=30; t->fireRate=1.0f;
-                        t->splashRadius=60; t->color=MAROON; break;
-                    default: break;
+        if (g->contextMenuOpen) {
+            /* Menü alanı: (contextMenuPos) - 144x80 */
+            Rectangle menuRect = {g->contextMenuPos.x - 2, g->contextMenuPos.y - 2, 144, 80};
+            if (CheckCollisionPointRec(mp, menuRect) && g->contextMenuTowerIdx >= 0) {
+                Tower *t = &g->towers[g->contextMenuTowerIdx];
+                Rectangle upgradeBtn = {g->contextMenuPos.x, g->contextMenuPos.y,      140, 34};
+                Rectangle sellBtn    = {g->contextMenuPos.x, g->contextMenuPos.y + 38, 140, 34};
+                if (t->active && CheckCollisionPointRec(mp, upgradeBtn) && t->level < 3) {
+                    int cost = GetTowerCost(t->type) * t->level;
+                    if (g->gold >= cost) {
+                        g->gold   -= cost;
+                        t->level++;
+                        t->damage *= 1.3f;
+                        t->range  *= 1.1f;
+                    }
+                } else if (t->active && CheckCollisionPointRec(mp, sellBtn)) {
+                    g->gold += GetTowerCost(t->type) / 2;
+                    g->grid[t->gridY][t->gridX] = CELL_BUILDABLE;
+                    t->active = false;
                 }
-                g->gold -= GetTowerCost(t->type);
-                g->grid[gy][gx] = CELL_TOWER;
-                break;
+            }
+            g->contextMenuOpen = false;
+        } else {
+            /* Normal kule yerleştirme */
+            int gx, gy;
+            if (WorldToGrid(mp, &gx, &gy) && CanPlaceTower(g, gx, gy)) {
+                for (int i = 0; i < MAX_TOWERS; i++) {
+                    if (g->towers[i].active) continue;
+                    Tower *t = &g->towers[i];
+                    memset(t, 0, sizeof(Tower));
+                    t->gridX   = gx;
+                    t->gridY   = gy;
+                    t->position= GridToWorld(gx, gy);
+                    t->type    = g->selectedTowerType;
+                    t->level   = 1;
+                    t->targetEnemyIndex = -1;
+                    t->active  = true;
+                    switch (t->type) {
+                        case TOWER_BASIC:
+                            t->range=150; t->damage=20; t->fireRate=2.0f;
+                            t->splashRadius=0; t->color=BLUE; break;
+                        case TOWER_SNIPER:
+                            t->range=300; t->damage=80; t->fireRate=0.5f;
+                            t->splashRadius=0; t->color=DARKGREEN; break;
+                        case TOWER_SPLASH:
+                            t->range=120; t->damage=30; t->fireRate=1.0f;
+                            t->splashRadius=60; t->color=MAROON; break;
+                        default: break;
+                    }
+                    g->gold -= GetTowerCost(t->type);
+                    g->grid[gy][gx] = CELL_TOWER;
+                    break;
+                }
             }
         }
     }
 
-    /* Sağ tık — kule yükselt */
+    /* Sağ tık — bağlam menüsünü aç (B01) */
     if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
         Vector2 mp = GetMousePosition();
+        bool hit = false;
         for (int i = 0; i < MAX_TOWERS; i++) {
             Tower *t = &g->towers[i];
             if (!t->active) continue;
             if (Vec2Distance(mp, t->position) < CELL_SIZE / 2.0f) {
-                if (t->level >= 3) break; /* Maks seviye */
-                int cost = GetTowerCost(t->type) * t->level;
-                if (g->gold < cost) break;
-                g->gold     -= cost;
-                t->level++;
-                t->damage   *= 1.3f;
-                t->range    *= 1.1f;
+                g->contextMenuOpen     = true;
+                g->contextMenuTowerIdx = i;
+                g->contextMenuPos      = mp;
+                hit = true;
                 break;
             }
         }
+        if (!hit) g->contextMenuOpen = false;
     }
 }
 
@@ -928,6 +976,13 @@ void DrawTowers(Game *g) {
         /* Seviye göstergesi (küçük nokta) */
         for (int lv = 0; lv < t->level; lv++)
             DrawCircle(px - half + 4 + lv * 8, py + half - 5, 3, YELLOW);
+
+        /* B04: ateş flash — kısa beyaz parıltı */
+        if (t->flashTimer > 0.0f) {
+            float alpha = t->flashTimer / 0.1f;
+            DrawCircle(px, py, (float)half * 1.3f,
+                       (Color){255, 255, 255, (unsigned char)(90 * alpha)});
+        }
     }
 }
 
@@ -1027,6 +1082,24 @@ void DrawHUD(Game *g) {
     /* Dalgayı başlat bilgisi */
     if (!g->waveActive && g->currentWave < g->totalWaves)
         DrawText("[ SPACE ] - Sonraki Dalgayi Baslat", SCREEN_WIDTH/2 - 180, 50, 18, YELLOW);
+
+    /* B03 — Dalga ilerleme çubuğu */
+    if (g->waveActive && g->currentWave < g->totalWaves) {
+        GameWave *w = &g->waves[g->currentWave];
+        int activeCount = 0;
+        for (int i = 0; i < MAX_ENEMIES; i++)
+            if (g->enemies[i].active) activeCount++;
+        float progress = (w->enemyCount > 0) ? (float)w->spawnedCount / w->enemyCount : 0.0f;
+        int bx = SCREEN_WIDTH / 2 - 200, by = 35, bw = 400, bh = 8;
+        DrawRectangle(bx, by, bw, bh, (Color){40, 40, 40, 200});
+        DrawRectangle(bx, by, (int)(bw * progress), bh, (Color){255, 180, 0, 230});
+        DrawRectangleLines(bx, by, bw, bh, (Color){160, 160, 160, 120});
+        char pbuf[48];
+        snprintf(pbuf, sizeof(pbuf), "%d/%d  [%d aktif]",
+                 w->spawnedCount, w->enemyCount, activeCount);
+        DrawText(pbuf, bx + bw/2 - MeasureText(pbuf, 13)/2, by - 15, 13,
+                 (Color){200, 200, 200, 200});
+    }
 }
 
 /* ============================================================
@@ -1095,11 +1168,71 @@ void DrawVictory(Game *g) {
 
 void DrawGame(Game *g) {
     DrawMap(g);
+    DrawPathArrows(g);      /* B02 */
     DrawPlacementPreview(g);
     DrawTowers(g);
     DrawEnemies(g);
     DrawProjectiles(g);
     DrawParticles(g);
+    DrawContextMenu(g);     /* B01 — en üste çizilsin */
+}
+
+/* ============================================================
+ * B02 — DrawPathArrows: Yol üzerinde yön okları
+ * ============================================================ */
+
+/* Waypoint segmentleri ortasına küçük üçgen oklar çizer. */
+void DrawPathArrows(Game *g) {
+    for (int i = 0; i + 1 < g->waypointCount; i++) {
+        Vector2 from = g->waypoints[i];
+        Vector2 to   = g->waypoints[i + 1];
+        Vector2 mid  = {(from.x + to.x) / 2.0f, (from.y + to.y) / 2.0f};
+        Vector2 dir  = Vec2Normalize(Vec2Subtract(to, from));
+        Vector2 perp = {-dir.y, dir.x};
+        float   s    = 9.0f;
+        Vector2 tip  = {mid.x + dir.x * s,    mid.y + dir.y * s};
+        Vector2 left = {mid.x - dir.x * s + perp.x * s * 0.55f,
+                        mid.y - dir.y * s + perp.y * s * 0.55f};
+        Vector2 right= {mid.x - dir.x * s - perp.x * s * 0.55f,
+                        mid.y - dir.y * s - perp.y * s * 0.55f};
+        DrawTriangle(tip, left, right, (Color){255, 255, 255, 90});
+    }
+}
+
+/* ============================================================
+ * B01 — DrawContextMenu: Kule sağ tık menüsü
+ * ============================================================ */
+
+/* Seçili kulenin yanında yükselt/sat seçeneklerini çizer. */
+void DrawContextMenu(Game *g) {
+    if (!g->contextMenuOpen || g->contextMenuTowerIdx < 0) return;
+    Tower *t = &g->towers[g->contextMenuTowerIdx];
+    if (!t->active) { g->contextMenuOpen = false; return; }
+
+    float mx = g->contextMenuPos.x;
+    float my = g->contextMenuPos.y;
+
+    DrawRectangle((int)mx - 2, (int)my - 2, 144, 80, (Color){15, 15, 25, 230});
+    DrawRectangleLines((int)mx - 2, (int)my - 2, 144, 80, (Color){200, 200, 200, 160});
+
+    Rectangle upgradeBtn = {mx, my,      140, 34};
+    Rectangle sellBtn    = {mx, my + 38, 140, 34};
+
+    /* Yükselt butonu */
+    char upgLabel[32];
+    if (t->level >= 3) {
+        snprintf(upgLabel, sizeof(upgLabel), "Maks Seviye");
+    } else {
+        int cost = GetTowerCost(t->type) * t->level;
+        snprintf(upgLabel, sizeof(upgLabel), "Yukselt (%dg)", cost);
+    }
+    bool canUpgrade = (t->level < 3 && g->gold >= GetTowerCost(t->type) * t->level);
+    DrawButton(upgradeBtn, upgLabel, canUpgrade ? DARKGREEN : DARKGRAY, WHITE);
+
+    /* Sat butonu */
+    char sellLabel[32];
+    snprintf(sellLabel, sizeof(sellLabel), "Sat (+%dg)", GetTowerCost(t->type) / 2);
+    DrawButton(sellBtn, sellLabel, (Color){120, 35, 35, 255}, WHITE);
 }
 
 /* ============================================================

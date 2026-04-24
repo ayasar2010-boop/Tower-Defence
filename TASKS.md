@@ -59,28 +59,28 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 - [x] **T37** — `InitGame()` / `RestartGame()`: Sıfırlama fonksiyonu
 
 ## AŞAMA 9 — Derleme ve Test
-- [ ] **T38** — `Makefile` doğrula, `make` ile temiz derleme
-- [ ] **T39** — Oynanabilirlik testi: Tüm dalgalar, kule yerleştir/yükselt, game over/victory
-- [ ] **T40** — Bellek / sınır kontrolü: Dizi overflow yok, grid sınır aşımı yok
+- [x] **T38** — `Makefile` doğrula, `make` ile temiz derleme
+- [x] **T39** — Oynanabilirlik testi: Tüm dalgalar, kule yerleştir/yükselt, game over/victory (splash ölüm hatası düzeltildi)
+- [x] **T40** — Bellek / sınır kontrolü: Dizi overflow yok, grid sınır aşımı yok
 
 ## BONUS (İsteğe Bağlı)
-- [ ] **B01** — Kule satma (sağ tık menüsü, %50 geri)
-- [ ] **B02** — Yol yön okları
-- [ ] **B03** — Dalga ilerleme çubuğu (mini progress bar)
-- [ ] **B04** — Kule ateş flash animasyonu
+- [x] **B01** — Kule satma (sağ tık menüsü, %50 geri)
+- [x] **B02** — Yol yön okları
+- [x] **B03** — Dalga ilerleme çubuğu (mini progress bar)
+- [x] **B04** — Kule ateş flash animasyonu
 
 ---
 
 ## Durum Özeti
 | Aşama | Toplam | Tamamlanan |
 |-------|--------|------------|
-| 1 — İskelet      | 5  | 0 |
-| 2 — Harita       | 5  | 0 |
-| 3 — Düşman       | 3  | 0 |
-| 4 — Kule         | 6  | 0 |
-| 5 — Mermi/Partik | 6  | 0 |
-| 6 — Dalga        | 4  | 0 |
-| 7 — HUD/Girdi    | 3  | 0 |
-| 8 — Ekranlar     | 5  | 0 |
-| 9 — Test         | 3  | 0 |
-| **Toplam**       | **40** | **0** |
+| 1 — İskelet      | 5  | 5 |
+| 2 — Harita       | 5  | 5 |
+| 3 — Düşman       | 3  | 3 |
+| 4 — Kule         | 6  | 6 |
+| 5 — Mermi/Partik | 6  | 6 |
+| 6 — Dalga        | 4  | 4 |
+| 7 — HUD/Girdi    | 3  | 3 |
+| 8 — Ekranlar     | 5  | 5 |
+| 9 — Test         | 3  | 3 |
+| **Toplam**       | **40** | **40** |
