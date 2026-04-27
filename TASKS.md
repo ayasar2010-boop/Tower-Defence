@@ -146,3 +146,16 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 | 15 — Genişletilmiş İçerik    | 3      | 3          |
 | **Toplam (yeni)**            | **13** | **13**     |
 
+## AŞAMA 16 — RTS MEKANİKLERİ, KAMERA & FOG OF WAR (UI_DESIGN.md)
+
+- [ ] **T65** — **RTS Seçim Kutusu:** Sol tık sürükleme ile dikdörtgen seçim kutusu. Kutu içindeki dost birimler `selected = true`. Seçili birimlere beyaz halka.
+- [x] **T66** — **ESC ile Kule/Bina İptali:** ESC önce kule/bina seçimini iptal eder, yoksa duraklatır. 1/2/3 kule, 4/5/6 bina seçimi.
+- [x] **T67** — **Kırsal Alan Binaları:** `CELL_RURAL` hücre tipi. Kışla/Pazar/Town Center binaları 4/5/6 tuşlarıyla rural alanlara kurulabilir.
+- [x] **T68** — **Büyük Harita + Köy:** 120×80 grid (CELL_SIZE=12). S-kıvrımlı uzun yol, sonunda 6×6 köy bloğu. `CELL_VILLAGE` hücre tipi + mini ev çizimi.
+- [x] **T69** — **Yakın Kamera + WASD Pan:** Default zoom 1.8×, min 1.2× max 3.0×. WASD ve kenar kaydırma ile pan. Harita sınır kontrolü.
+- [x] **T70** — **Minimap + Fog of War:** Sol alt 200×130px minimap, kamera viewport çerçevesi. Fog: kule/birim/hero etrafı aydınlık, geri kalan karanlık. Fogdaki düşmanlar çizilmez ve vurulamaz.
+
+| Aşama                          | Toplam | Tamamlanan |
+|--------------------------------|--------|------------|
+| 16 — RTS/Kamera/Fog            | 6      | 5          |
+

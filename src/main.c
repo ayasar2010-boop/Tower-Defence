@@ -20,11 +20,11 @@
 
 #define SCREEN_WIDTH            1280
 #define SCREEN_HEIGHT           720
-#define GRID_COLS               20
-#define GRID_ROWS               12
-#define CELL_SIZE               48
-#define GRID_OFFSET_X           ((SCREEN_WIDTH - GRID_COLS * CELL_SIZE) / 2)
-#define GRID_OFFSET_Y           80
+#define GRID_COLS               120
+#define GRID_ROWS               80
+#define CELL_SIZE               12
+#define GRID_OFFSET_X           0
+#define GRID_OFFSET_Y           0
 
 #define MAX_ENEMIES             50
 #define MAX_TOWERS              30
@@ -65,7 +65,9 @@ typedef enum {
     CELL_EMPTY    = 0,
     CELL_PATH     = 1,
     CELL_BUILDABLE= 2,
-    CELL_TOWER    = 3
+    CELL_TOWER    = 3,
+    CELL_RURAL    = 4,  /* T67 — Bina kurulabilir kırsal alan */
+    CELL_VILLAGE  = 5   /* T68 — Korunan köy/kasaba */
 } CellType;
 
 typedef enum {
@@ -147,6 +149,7 @@ typedef struct {
     float      attackSpeed; /* saldiris/saniye */
     int        engagedEnemyIdx; /* -1 = serbest */
     bool       active;
+    bool       selected;   /* T65 — RTS seçim kutusuyla seçilmiş mi */
 } FriendlyUnit;
 
 typedef struct {
@@ -378,9 +381,10 @@ typedef struct {
 #define PREP_PHASE_DURATION 25.0f
 
 typedef enum {
-    BUILDING_BARRACKS,   /* +altın her dalgada */
-    BUILDING_MARKET,     /* kule maliyetini düşürür */
-    BUILDING_BARRICADE,  /* yol üstüne engel — düşmanı yavaşlatır */
+    BUILDING_BARRACKS,    /* Her dalga başında +1 dost birim */
+    BUILDING_MARKET,      /* Düşman öldürme altın ödülü +20% */
+    BUILDING_BARRICADE,   /* Yol üstüne engel — düşmanı yavaşlatır */
+    BUILDING_TOWN_CENTER, /* T67 — Pasif gelir: 10 sn’de +5 altın. Maks 1 */
     BUILDING_TYPE_COUNT
 } BuildingType;
 
@@ -478,6 +482,19 @@ typedef struct {
 
     /* T64 — Ses Sistemi */
     AudioManager   audio;
+
+    /* T65 — RTS Seçim Kutusu */
+    bool       isSelecting;
+    Vector2    selectionStart;
+    Vector2    selectionEnd;
+
+    /* T66/T67 — Kule/Bina seçim modu: -1 = hiçbiri seçili değil */
+    int        selectedBuildingType;   /* -1 veya BuildingType */
+    float      townCenterTimer;        /* T67 — Pasif gelir zamanlayıcı */
+
+    /* T70 — Fog of War */
+    bool       fogVisible[GRID_ROWS][GRID_COLS]; /* true = şu an görünür */
+    bool       fogExplored[GRID_ROWS][GRID_COLS]; /* true = en az bir kez keşfedildi */
 } Game;
 
 /* ============================================================
@@ -646,42 +663,63 @@ bool CanPlaceTower(Game *g, int gx, int gy) {
 }
 
 /* ============================================================
- * T06 — InitMap: 20×12 Hardcoded Harita
+ * T06/T68 — InitMap: 32×18 Büyük Harita + Köy
  * ============================================================ */
 
-/* Haritayı başlatır: yol (1), buildable (2) ve boş (0) hücreleri atar.
- * Yol: sol kenardan sağa, 3 virajlı S benzeri rota. */
+/* Haritayı başlatır: yol, buildable, rural, village. 120×80 büyük harita. */
 void InitMap(Game *g) {
-    /* Tümünü boş başlat */
     memset(g->grid, CELL_EMPTY, sizeof(g->grid));
 
-    /* Yol tanımı — satır bazlı (row, colStart, colEnd) */
-    /* Segment 1: üst yatay  — satır 2, sütun 0..7   */
-    for (int c = 0; c <= 7; c++)  g->grid[2][c] = CELL_PATH;
-    /* Segment 2: sol dikey  — sütun 7, satır 2..6   */
-    for (int r = 2; r <= 6; r++)  g->grid[r][7] = CELL_PATH;
-    /* Segment 3: orta yatay — satır 6, sütun 7..13  */
-    for (int c = 7; c <= 13; c++) g->grid[6][c] = CELL_PATH;
-    /* Segment 4: sağ dikey  — sütun 13, satır 6..9  */
-    for (int r = 6; r <= 9; r++)  g->grid[r][13] = CELL_PATH;
-    /* Segment 5: alt yatay  — satır 9, sütun 13..19 */
-    for (int c = 13; c <= 19; c++) g->grid[9][c] = CELL_PATH;
+    /* === UZUN S-KIVRIMI YOL (sol kenardan → sağ alt köye) ===
+     * Seg  1: satır 10, sütun 0..25     (yatay sağa)
+     * Seg  2: sütun 25, satır 10..30    (dikey aşağı)
+     * Seg  3: satır 30, sütun 10..25    (yatay sola)
+     * Seg  4: sütun 10, satır 30..45    (dikey aşağı)
+     * Seg  5: satır 45, sütun 10..50    (yatay sağa)
+     * Seg  6: sütun 50, satır 45..55    (dikey aşağı)
+     * Seg  7: satır 55, sütun 50..80    (yatay sağa)
+     * Seg  8: sütun 80, satır 55..65    (dikey aşağı)
+     * Seg  9: satır 65, sütun 80..105   (yatay sağa)
+     * Seg 10: sütun 105, satır 65..72   (dikey aşağı → köy)
+     */
+    for (int c = 0;   c <= 25;  c++) g->grid[10][c]  = CELL_PATH;
+    for (int r = 10;  r <= 30;  r++) g->grid[r][25]  = CELL_PATH;
+    for (int c = 10;  c <= 25;  c++) g->grid[30][c]  = CELL_PATH;
+    for (int r = 30;  r <= 45;  r++) g->grid[r][10]  = CELL_PATH;
+    for (int c = 10;  c <= 50;  c++) g->grid[45][c]  = CELL_PATH;
+    for (int r = 45;  r <= 55;  r++) g->grid[r][50]  = CELL_PATH;
+    for (int c = 50;  c <= 80;  c++) g->grid[55][c]  = CELL_PATH;
+    for (int r = 55;  r <= 65;  r++) g->grid[r][80]  = CELL_PATH;
+    for (int c = 80;  c <= 105; c++) g->grid[65][c]  = CELL_PATH;
+    for (int r = 65;  r <= 72;  r++) g->grid[r][105] = CELL_PATH;
 
-    /* Buildable hücreler: yol kenarları (CELL_EMPTY olan komşular) */
-    int dr[] = {-1, 1, 0, 0};
-    int dc[] = {0, 0, -1, 1};
-    /* İki geçişte işaretle; önce path'ı tara, sonra buildable'a at */
-    for (int r = 0; r < GRID_ROWS; r++) {
-        for (int c = 0; c < GRID_COLS; c++) {
-            if (g->grid[r][c] != CELL_PATH) continue;
-            for (int d = 0; d < 4; d++) {
-                int nr = r + dr[d], nc = c + dc[d];
-                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
-                if (g->grid[nr][nc] == CELL_EMPTY)
-                    g->grid[nr][nc] = CELL_BUILDABLE;
+    /* === KÖY (VILLAGE) — yolun sonunda 6×6 blok === */
+    for (int r = 70; r <= 77; r++)
+        for (int c = 107; c <= 115; c++)
+            g->grid[r][c] = CELL_VILLAGE;
+
+    /* === BUILDABLE hücreler: yol etrafı (2 hücre mesafe, 8 yön) === */
+    int dr8[] = {-1, 1, 0, 0, -1, -1, 1, 1};
+    int dc8[] = {0, 0, -1, 1, -1, 1, -1, 1};
+    for (int pass = 0; pass < 2; pass++) { /* 2 geçiş: 2 hücre derinlik */
+        for (int r = 0; r < GRID_ROWS; r++) {
+            for (int c = 0; c < GRID_COLS; c++) {
+                if (g->grid[r][c] != CELL_PATH && g->grid[r][c] != CELL_BUILDABLE) continue;
+                for (int d = 0; d < 8; d++) {
+                    int nr = r + dr8[d], nc = c + dc8[d];
+                    if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+                    if (g->grid[nr][nc] == CELL_EMPTY)
+                        g->grid[nr][nc] = CELL_BUILDABLE;
+                }
             }
         }
     }
+
+    /* === RURAL alanlar: kalan boş hücreler === */
+    for (int r = 0; r < GRID_ROWS; r++)
+        for (int c = 0; c < GRID_COLS; c++)
+            if (g->grid[r][c] == CELL_EMPTY)
+                g->grid[r][c] = CELL_RURAL;
 }
 
 /* ============================================================
@@ -692,20 +730,25 @@ void InitMap(Game *g) {
 void InitWaypoints(Game *g) {
     g->waypointCount = 0;
     int wp[][2] = {
-        {0,  2},   /* giriş — sol kenar */
-        {7,  2},   /* sağa dön */
-        {7,  6},   /* aşağı in */
-        {13, 6},   /* sağa git */
-        {13, 9},   /* aşağı in */
-        {19, 9}    /* çıkış — sağ kenar */
+        {0,    10},   /* giriş — sol kenar */
+        {25,   10},   /* sağa dön */
+        {25,   30},   /* aşağı in */
+        {10,   30},   /* sola dön */
+        {10,   45},   /* aşağı in */
+        {50,   45},   /* sağa git */
+        {50,   55},   /* aşağı in */
+        {80,   55},   /* sağa git */
+        {80,   65},   /* aşağı in */
+        {105,  65},   /* sağa git */
+        {105,  72}    /* köy kapısı — çıkış */
     };
     int n = sizeof(wp) / sizeof(wp[0]);
     for (int i = 0; i < n && i < MAX_WAYPOINTS; i++) {
         g->waypoints[i] = GridToWorld(wp[i][0], wp[i][1]);
         g->waypointCount++;
     }
-    /* İlk waypoint spawn noktasının soluna kaydır (görünür girişten gelsin) */
-    g->waypoints[0].x = (float)GRID_OFFSET_X - CELL_SIZE;
+    /* İlk waypoint spawn noktasını harita dışına kaydır */
+    g->waypoints[0].x = -CELL_SIZE * 2.0f;
 }
 
 /* ============================================================
@@ -1108,11 +1151,12 @@ void InitGame(Game *g) {
     InitHomeCity(&g->homeCity);
     InitSiegeMechanics(&g->siege);
     g->selectedBuilding = BUILDING_BARRACKS;
-    /* T63 — Kamera başlangıç değerleri */
-    g->camera.zoom = 1.0f;
-    g->camera.cam.zoom = 1.0f;
-    g->camera.cam.target = (Vector2){0, 0};
-    g->camera.cam.offset = (Vector2){0, 0};
+    g->selectedBuildingType = -1;
+    /* T69 — Kamera: yakın görünüm, yolun başlangıcına merkezle */
+    g->camera.zoom = 1.8f;
+    g->camera.cam.zoom = 1.8f;
+    g->camera.cam.target = (Vector2){0, 10 * CELL_SIZE};
+    g->camera.cam.offset = (Vector2){SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
     g->camera.heroFollow = false;
     InitUI(SCREEN_WIDTH);
     /* Dost birim dizisini sifirla */
@@ -1344,6 +1388,10 @@ void DrawFriendlyUnits(Game *g) {
         else
             DrawText("A", (int)fu->position.x + 8, (int)fu->position.y - 22, 10,
                      (Color){255,160,30,220});
+
+        /* T65 — Seçili birim beyaz halka */
+        if (fu->selected)
+            DrawCircleLines((int)fu->position.x, (int)fu->position.y, 16, WHITE);
     }
 }
 
@@ -1458,10 +1506,16 @@ void SpawnParticles(Game *g, Vector2 pos, Color color, int count, float speed, f
 /* Verilen pozisyon ve menzil içindeki en yakın aktif düşmanın indeksini döner.
  * Hiçbiri yoksa -1 döner. */
 int FindNearestEnemy(Game *g, Vector2 pos, float range) {
-    float minDist  = range + 1.0f; /* range dışından başla, böylece hiç düşman yoksa -1 kalır */
+    float minDist  = range + 1.0f;
     int   bestIdx  = -1;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!g->enemies[i].active) continue;
+        /* T70 — Fogdaki düşmanlara vurulamaz */
+        int er = (int)(g->enemies[i].position.y) / CELL_SIZE;
+        int ec = (int)(g->enemies[i].position.x) / CELL_SIZE;
+        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS) {
+            if (!g->fogVisible[er][ec]) continue;
+        }
         float d = Vec2Distance(pos, g->enemies[i].position);
         if (d <= range && d < minDist) {
             minDist = d;
@@ -1999,29 +2053,53 @@ void DrawTowerSynergies(Game *g) {
  * T63 — UpdateGameCamera
  * ============================================================ */
 
-/* Scroll zoom, hero takip ve ScreenShake offset'ini Camera2D'ye yansıtır. */
+/* T69 — Kamera: WASD pan, kenar kaydırma, zoom, sınır kontrolü */
 void UpdateGameCamera(Game *g, float dt) {
-    (void)dt;
     GameCamera *gc = &g->camera;
+    float panSpeed = 400.0f / gc->zoom; /* Yakın zoomda yavaş, uzakta hızlı */
 
-    /* Scroll ile zoom: 0.5× – 2.0× */
+    /* WASD ile kamera kaydırma (STATE_DUNGEON dışında) */
+    if (g->state == STATE_PLAYING || g->state == STATE_PREP_PHASE) {
+        if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP))    gc->cam.target.y -= panSpeed * dt;
+        if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN))   gc->cam.target.y += panSpeed * dt;
+        if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT))   gc->cam.target.x -= panSpeed * dt;
+        if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT))  gc->cam.target.x += panSpeed * dt;
+    }
+
+    /* Ekran kenarına fare gelince kaydırma (20px bant) */
+    Vector2 mp = GetMousePosition();
+    float edgeBand = 20.0f;
+    if (mp.x < edgeBand)                     gc->cam.target.x -= panSpeed * dt;
+    if (mp.x > SCREEN_WIDTH - edgeBand)      gc->cam.target.x += panSpeed * dt;
+    if (mp.y < edgeBand)                     gc->cam.target.y -= panSpeed * dt;
+    if (mp.y > SCREEN_HEIGHT - edgeBand)     gc->cam.target.y += panSpeed * dt;
+
+    /* Scroll ile zoom: 1.2× – 3.0× */
     float wheel = GetMouseWheelMove();
     if (wheel != 0.0f) {
-        gc->zoom += wheel * 0.1f;
-        if (gc->zoom < 0.5f) gc->zoom = 0.5f;
-        if (gc->zoom > 2.0f) gc->zoom = 2.0f;
+        gc->zoom += wheel * 0.15f;
+        if (gc->zoom < 1.2f) gc->zoom = 1.2f;
+        if (gc->zoom > 3.0f) gc->zoom = 3.0f;
         gc->cam.zoom = gc->zoom;
     }
 
+    /* Hero takibi */
     if (gc->heroFollow && g->hero.alive) {
-        /* Hero'yu ekran merkezinde tut */
         gc->cam.target = g->hero.position;
-        gc->cam.offset = (Vector2){SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
-    } else {
-        /* Sabit görüş: zoom anchor = ekran sol üst */
-        gc->cam.target = (Vector2){0, 0};
-        gc->cam.offset = (Vector2){0, 0};
     }
+
+    /* Kamera offset = ekran merkezi */
+    gc->cam.offset = (Vector2){SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
+
+    /* Harita sınırlarına klample */
+    float worldW = (float)(GRID_COLS * CELL_SIZE);
+    float worldH = (float)(GRID_ROWS * CELL_SIZE);
+    float halfViewW = (SCREEN_WIDTH / 2.0f) / gc->zoom;
+    float halfViewH = (SCREEN_HEIGHT / 2.0f) / gc->zoom;
+    if (gc->cam.target.x < halfViewW) gc->cam.target.x = halfViewW;
+    if (gc->cam.target.y < halfViewH) gc->cam.target.y = halfViewH;
+    if (gc->cam.target.x > worldW - halfViewW) gc->cam.target.x = worldW - halfViewW;
+    if (gc->cam.target.y > worldH - halfViewH) gc->cam.target.y = worldH - halfViewH;
 }
 
 /* ============================================================
@@ -2263,10 +2341,10 @@ void UpdateLevelComplete(Game *g, float dt) {
 
 /* Klavye ve fare girdisini işler: kule seçimi, yerleştirme, yükseltme ve durum değişiklikleri. */
 void HandleInput(Game *g) {
-    /* Kule tipi seç */
-    if (IsKeyPressed(KEY_ONE))   g->selectedTowerType = TOWER_BASIC;
-    if (IsKeyPressed(KEY_TWO))   g->selectedTowerType = TOWER_SNIPER;
-    if (IsKeyPressed(KEY_THREE)) g->selectedTowerType = TOWER_SPLASH;
+    /* Kule tipi seç — bina seçimini sıfırla */
+    if (IsKeyPressed(KEY_ONE))   { g->selectedTowerType = TOWER_BASIC;  g->selectedBuildingType = -1; }
+    if (IsKeyPressed(KEY_TWO))   { g->selectedTowerType = TOWER_SNIPER; g->selectedBuildingType = -1; }
+    if (IsKeyPressed(KEY_THREE)) { g->selectedTowerType = TOWER_SPLASH; g->selectedBuildingType = -1; }
 
     /* Oyun hızı */
     if (IsKeyPressed(KEY_F))
@@ -2280,132 +2358,193 @@ void HandleInput(Game *g) {
     if (IsKeyPressed(KEY_H))
         g->camera.heroFollow = !g->camera.heroFollow;
 
-    /* Duraklat — bağlam menüsünü de kapat */
-    if (IsKeyPressed(KEY_P) || IsKeyPressed(KEY_ESCAPE)) {
+    /* T66 — ESC: önce kule/bina seçimi iptal, yoksa duraklat */
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        if (g->selectedTowerType != (TowerType)-1 || g->selectedBuildingType >= 0) {
+            /* Kule veya bina seçimini iptal et */
+            g->selectedTowerType = (TowerType)-1;
+            g->selectedBuildingType = -1;
+        } else {
+            g->contextMenuOpen = false;
+            g->state = STATE_PAUSED;
+        }
+    }
+    if (IsKeyPressed(KEY_P)) {
         g->contextMenuOpen = false;
         g->state = STATE_PAUSED;
     }
 
-    /* A tusu — tum dost birimleri saldir moduna al */
-    if (IsKeyPressed(KEY_A)) {
-        for (int i = 0; i < MAX_FRIENDLY_UNITS; i++)
-            if (g->friendlyUnits[i].active)
-                g->friendlyUnits[i].order = FUNIT_ATTACK;
-    }
-    /* S tusu — tum dost birimleri bekle moduna al */
-    if (IsKeyPressed(KEY_S)) {
-        for (int i = 0; i < MAX_FRIENDLY_UNITS; i++)
-            if (g->friendlyUnits[i].active)
-                g->friendlyUnits[i].order = FUNIT_HOLD;
-    }
+    /* T67 — Bina seçimi: 4/5/6 */
+    if (IsKeyPressed(KEY_FOUR))  { g->selectedBuildingType = BUILDING_BARRACKS;    g->selectedTowerType = (TowerType)-1; }
+    if (IsKeyPressed(KEY_FIVE))  { g->selectedBuildingType = BUILDING_MARKET;      g->selectedTowerType = (TowerType)-1; }
+    if (IsKeyPressed(KEY_SIX))   { g->selectedBuildingType = BUILDING_TOWN_CENTER; g->selectedTowerType = (TowerType)-1; }
 
-    /* Sol tık — bağlam menüsü açıksa işle, değilse kule yerleştir */
+    /* T65 — RTS Seçim Kutusu: sol tık basılı sürükleme */
+    Vector2 screenMp = GetMousePosition();
+    Vector2 worldMp = GetScreenToWorld2D(screenMp, g->camera.cam);
+
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        Vector2 mp = GetMousePosition();
-        /* Birim yerlestirme modu: bekleyen birim varsa once onu yerlestur */
-        if (g->pendingPlacementCount > 0 && !g->contextMenuOpen) {
-            int gx, gy;
-            if (WorldToGrid(mp, &gx, &gy) &&
-                (g->grid[gy][gx] == CELL_BUILDABLE || g->grid[gy][gx] == CELL_PATH)) {
-                for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
-                    if (g->friendlyUnits[i].active) continue;
-                    InitFriendlyUnit(&g->friendlyUnits[i],
-                                     g->pendingPlacementType,
-                                     GridToWorld(gx, gy));
-                    g->pendingPlacementCount--;
-                    break;
-                }
+        g->isSelecting = true;
+        g->selectionStart = screenMp;
+        g->selectionEnd = screenMp;
+    }
+    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) && g->isSelecting) {
+        g->selectionEnd = screenMp;
+    }
+    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && g->isSelecting) {
+        g->isSelecting = false;
+        float dx = g->selectionEnd.x - g->selectionStart.x;
+        float dy = g->selectionEnd.y - g->selectionStart.y;
+        float dragDist = sqrtf(dx*dx + dy*dy);
+
+        if (dragDist > 8.0f) {
+            /* Büyük sürükleme → birim seçimi */
+            /* Seçim dikdörtgenini dünya koordinatına çevir */
+            Vector2 worldStart = GetScreenToWorld2D(g->selectionStart, g->camera.cam);
+            Vector2 worldEnd   = GetScreenToWorld2D(g->selectionEnd, g->camera.cam);
+            float minX = fminf(worldStart.x, worldEnd.x);
+            float maxX = fmaxf(worldStart.x, worldEnd.x);
+            float minY = fminf(worldStart.y, worldEnd.y);
+            float maxY = fmaxf(worldStart.y, worldEnd.y);
+            for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
+                FriendlyUnit *fu = &g->friendlyUnits[i];
+                if (!fu->active) { fu->selected = false; continue; }
+                fu->selected = (fu->position.x >= minX && fu->position.x <= maxX &&
+                                fu->position.y >= minY && fu->position.y <= maxY);
             }
-            /* Yerlestirme modundayken kule koyma */
-            goto done_left_click;
-        }
-        if (g->contextMenuOpen) {
-            /* Menü alanı: (contextMenuPos) - 144x80 */
-            Rectangle menuRect = {g->contextMenuPos.x - 2, g->contextMenuPos.y - 2, 144, 80};
-            if (CheckCollisionPointRec(mp, menuRect) && g->contextMenuTowerIdx >= 0) {
-                Tower *t = &g->towers[g->contextMenuTowerIdx];
-                Rectangle upgradeBtn = {g->contextMenuPos.x, g->contextMenuPos.y,      140, 34};
-                Rectangle sellBtn    = {g->contextMenuPos.x, g->contextMenuPos.y + 38, 140, 34};
-                if (t->active && CheckCollisionPointRec(mp, upgradeBtn) && t->level < 3) {
-                    int cost = GetTowerCost(t->type) * t->level;
-                    if (g->gold >= cost) {
-                        g->gold   -= cost;
-                        t->level++;
-                        t->damage *= 1.3f;
-                        t->range  *= 1.1f;
-                        PlaySFX(&g->audio, SFX_TOWER_UPGRADE); /* T64 */
-                    }
-                } else if (t->active && CheckCollisionPointRec(mp, sellBtn)) {
-                    g->gold += GetTowerCost(t->type) / 2;
-                    PlaySFX(&g->audio, SFX_TOWER_SELL); /* T64 */
-                    g->grid[t->gridY][t->gridX] = CELL_BUILDABLE;
-                    t->active = false;
-                }
-            }
-            g->contextMenuOpen = false;
         } else {
-            /* Normal kule yerleştirme */
-            int gx, gy;
-            if (WorldToGrid(mp, &gx, &gy) && CanPlaceTower(g, gx, gy)) {
-                for (int i = 0; i < MAX_TOWERS; i++) {
-                    if (g->towers[i].active) continue;
-                    Tower *t = &g->towers[i];
-                    memset(t, 0, sizeof(Tower));
-                    t->gridX   = gx;
-                    t->gridY   = gy;
-                    t->position= GridToWorld(gx, gy);
-                    t->type    = g->selectedTowerType;
-                    t->level   = 1;
-                    t->targetEnemyIndex = -1;
-                    t->active  = true;
-                    switch (t->type) {
-                        case TOWER_BASIC:
-                            t->range=150; t->damage=20; t->fireRate=2.0f;
-                            t->splashRadius=0; t->color=BLUE; break;
-                        case TOWER_SNIPER:
-                            t->range=300; t->damage=80; t->fireRate=0.5f;
-                            t->splashRadius=0; t->color=DARKGREEN; break;
-                        case TOWER_SPLASH:
-                            t->range=120; t->damage=30; t->fireRate=1.0f;
-                            t->splashRadius=60; t->color=MAROON; break;
+            /* Küçük tık → kule/bina yerleştirme */
+            /* Tüm seçimleri kaldır */
+            for (int i = 0; i < MAX_FRIENDLY_UNITS; i++)
+                g->friendlyUnits[i].selected = false;
+
+            /* Birim yerleştirme modu */
+            if (g->pendingPlacementCount > 0 && !g->contextMenuOpen) {
+                int gx, gy;
+                if (WorldToGrid(worldMp, &gx, &gy) &&
+                    (g->grid[gy][gx] == CELL_BUILDABLE || g->grid[gy][gx] == CELL_PATH)) {
+                    for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
+                        if (g->friendlyUnits[i].active) continue;
+                        InitFriendlyUnit(&g->friendlyUnits[i],
+                                         g->pendingPlacementType,
+                                         GridToWorld(gx, gy));
+                        g->pendingPlacementCount--;
+                        break;
+                    }
+                }
+            }
+            /* Bağlam menüsü */
+            else if (g->contextMenuOpen) {
+                Rectangle menuRect = {g->contextMenuPos.x - 2, g->contextMenuPos.y - 2, 144, 80};
+                if (CheckCollisionPointRec(screenMp, menuRect) && g->contextMenuTowerIdx >= 0) {
+                    Tower *t = &g->towers[g->contextMenuTowerIdx];
+                    Rectangle upgradeBtn = {g->contextMenuPos.x, g->contextMenuPos.y,      140, 34};
+                    Rectangle sellBtn    = {g->contextMenuPos.x, g->contextMenuPos.y + 38, 140, 34};
+                    if (t->active && CheckCollisionPointRec(screenMp, upgradeBtn) && t->level < 3) {
+                        int cost = GetTowerCost(t->type) * t->level;
+                        if (g->gold >= cost) {
+                            g->gold   -= cost;
+                            t->level++;
+                            t->damage *= 1.3f;
+                            t->range  *= 1.1f;
+                            PlaySFX(&g->audio, SFX_TOWER_UPGRADE);
+                        }
+                    } else if (t->active && CheckCollisionPointRec(screenMp, sellBtn)) {
+                        g->gold += GetTowerCost(t->type) / 2;
+                        PlaySFX(&g->audio, SFX_TOWER_SELL);
+                        g->grid[t->gridY][t->gridX] = CELL_BUILDABLE;
+                        t->active = false;
+                    }
+                }
+                g->contextMenuOpen = false;
+            }
+            /* T67 — Bina yerleştirme (rural alana) */
+            else if (g->selectedBuildingType >= 0) {
+                int gx, gy;
+                if (WorldToGrid(worldMp, &gx, &gy) && g->grid[gy][gx] == CELL_RURAL) {
+                    int cost = 0;
+                    switch (g->selectedBuildingType) {
+                        case BUILDING_BARRACKS:    cost = 100; break;
+                        case BUILDING_MARKET:      cost = 120; break;
+                        case BUILDING_TOWN_CENTER: cost = 200; break;
                         default: break;
                     }
-                    /* T52 — Hero sınıf bonusu kule istatistiklerine uygula */
-                    if (g->hero.heroClass == HERO_WARRIOR) {
-                        t->damage   *= 1.15f;
-                    } else if (g->hero.heroClass == HERO_MAGE) {
-                        t->range    *= 1.20f;
-                    } else if (g->hero.heroClass == HERO_ARCHER) {
-                        t->fireRate *= 1.25f;
+                    /* Town Center maks 1 adet kontrolü */
+                    bool canBuild = (g->gold >= cost);
+                    if (g->selectedBuildingType == BUILDING_TOWN_CENTER) {
+                        for (int i = 0; i < g->buildingCount; i++)
+                            if (g->buildings[i].active && g->buildings[i].type == BUILDING_TOWN_CENTER)
+                                canBuild = false;
                     }
-                    g->gold -= GetTowerCost(t->type);
-                    g->grid[gy][gx] = CELL_TOWER;
-                    ApplySynergyBonuses(g, i); /* T59 — sinerji kontrolü */
-                    PlaySFX(&g->audio, SFX_TOWER_PLACE); /* T64 */
-                    break;
+                    if (canBuild && g->buildingCount < MAX_BUILDINGS) {
+                        Building *b = &g->buildings[g->buildingCount++];
+                        memset(b, 0, sizeof(Building));
+                        b->gridX = gx;
+                        b->gridY = gy;
+                        b->type = (BuildingType)g->selectedBuildingType;
+                        b->active = true;
+                        g->gold -= cost;
+                        g->grid[gy][gx] = CELL_TOWER; /* İşgal edildi */
+                    }
+                }
+            }
+            /* Kule yerleştirme */
+            else if ((int)g->selectedTowerType >= 0 && (int)g->selectedTowerType < TOWER_TYPE_COUNT) {
+                int gx, gy;
+                if (WorldToGrid(worldMp, &gx, &gy) && CanPlaceTower(g, gx, gy)) {
+                    for (int i = 0; i < MAX_TOWERS; i++) {
+                        if (g->towers[i].active) continue;
+                        Tower *t = &g->towers[i];
+                        memset(t, 0, sizeof(Tower));
+                        t->gridX   = gx;
+                        t->gridY   = gy;
+                        t->position= GridToWorld(gx, gy);
+                        t->type    = g->selectedTowerType;
+                        t->level   = 1;
+                        t->targetEnemyIndex = -1;
+                        t->active  = true;
+                        switch (t->type) {
+                            case TOWER_BASIC:
+                                t->range=150; t->damage=20; t->fireRate=2.0f;
+                                t->splashRadius=0; t->color=BLUE; break;
+                            case TOWER_SNIPER:
+                                t->range=300; t->damage=80; t->fireRate=0.5f;
+                                t->splashRadius=0; t->color=DARKGREEN; break;
+                            case TOWER_SPLASH:
+                                t->range=120; t->damage=30; t->fireRate=1.0f;
+                                t->splashRadius=60; t->color=MAROON; break;
+                            default: break;
+                        }
+                        if (g->hero.heroClass == HERO_WARRIOR)     t->damage   *= 1.15f;
+                        else if (g->hero.heroClass == HERO_MAGE)   t->range    *= 1.20f;
+                        else if (g->hero.heroClass == HERO_ARCHER) t->fireRate *= 1.25f;
+                        g->gold -= GetTowerCost(t->type);
+                        g->grid[gy][gx] = CELL_TOWER;
+                        ApplySynergyBonuses(g, i);
+                        PlaySFX(&g->audio, SFX_TOWER_PLACE);
+                        break;
+                    }
                 }
             }
         }
     }
 
-    /* Sağ tık — bağlam menüsünü aç (B01) */
+    /* Sağ tık — bağlam menüsünü aç */
     if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-        Vector2 mp = GetMousePosition();
         bool hit = false;
         for (int i = 0; i < MAX_TOWERS; i++) {
             Tower *t = &g->towers[i];
             if (!t->active) continue;
-            if (Vec2Distance(mp, t->position) < CELL_SIZE / 2.0f) {
+            if (Vec2Distance(worldMp, t->position) < CELL_SIZE / 2.0f) {
                 g->contextMenuOpen     = true;
                 g->contextMenuTowerIdx = i;
-                g->contextMenuPos      = mp;
+                g->contextMenuPos      = screenMp;
                 hit = true;
                 break;
             }
         }
         if (!hit) g->contextMenuOpen = false;
     }
-    done_left_click:; /* goto hedefi — yerlestirme modundan erken cikis */
 }
 
 /* ============================================================
@@ -2517,14 +2656,28 @@ void DrawMap(Game *g) {
             int y = GRID_OFFSET_Y + r * CELL_SIZE;
             Color fill;
             switch (g->grid[r][c]) {
-                case CELL_PATH:      fill = (Color){160, 130, 90, 255}; break;  /* Açık kahverengi */
-                case CELL_BUILDABLE: fill = (Color){50,  80,  50, 255}; break;  /* Hafif yeşil */
-                case CELL_TOWER:     fill = (Color){40,  60,  40, 255}; break;  /* Kule altı */
-                default:             fill = (Color){30,  50,  30, 255}; break;  /* Koyu yeşil */
+                case CELL_PATH:      fill = (Color){160, 130, 90, 255}; break;
+                case CELL_BUILDABLE: fill = (Color){50,  80,  50, 255}; break;
+                case CELL_TOWER:     fill = (Color){40,  60,  40, 255}; break;
+                case CELL_RURAL:     fill = (Color){38,  55,  28, 255}; break;  /* T67 Koyu çayır */
+                case CELL_VILLAGE:   fill = (Color){90,  70,  45, 255}; break;  /* T68 Köy zemini */
+                default:             fill = (Color){30,  50,  30, 255}; break;
             }
             DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, fill);
-            /* TODO (sprite): DrawTextureRec(g->assets.tileGrass veya tilePath,
-             *   tileRect, (Vector2){x,y}, WHITE) */
+
+            /* T68 — Köy hücrelerine mini ev çiz */
+            if (g->grid[r][c] == CELL_VILLAGE) {
+                int hx = x + CELL_SIZE/4, hy = y + CELL_SIZE/4;
+                int hw = CELL_SIZE/2, hh = CELL_SIZE/3;
+                DrawRectangle(hx, hy + hh/2, hw, hh/2, (Color){120, 90, 55, 255});
+                /* Çatı (üçgen) */
+                DrawTriangle(
+                    (Vector2){(float)(hx + hw/2), (float)hy},
+                    (Vector2){(float)hx, (float)(hy + hh/2)},
+                    (Vector2){(float)(hx + hw), (float)(hy + hh/2)},
+                    (Color){180, 60, 40, 255});
+            }
+
             if (g->showGrid)
                 DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, (Color){255, 255, 255, 25});
         }
@@ -2540,6 +2693,13 @@ void DrawEnemies(Game *g) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->active) continue;
+
+        /* T70 — Fogdaki düşmanlar çizilmez */
+        int er = (int)(e->position.y) / CELL_SIZE;
+        int ec = (int)(e->position.x) / CELL_SIZE;
+        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS) {
+            if (!g->fogVisible[er][ec]) continue;
+        }
 
         /* Şekil: Normal=daire, Fast=üçgen, Tank=kare
          * TODO (sprite): DrawTextureRec(g->assets.enemyNormal/Fast/Tank,
@@ -2929,6 +3089,154 @@ void DrawVictory(Game *g) {
 }
 
 /* ============================================================
+ * T70 — Fog of War Hesaplama
+ * ============================================================ */
+
+/* Fog grid'ini her frame kuleler + dost birimler + hero'dan yeniden hesaplar. */
+void UpdateFogOfWar(Game *g) {
+    /* Tüm görünürlüğü sıfırla */
+    memset(g->fogVisible, 0, sizeof(g->fogVisible));
+
+    /* Köy her zaman görünür */
+    for (int r = 0; r < GRID_ROWS; r++)
+        for (int c = 0; c < GRID_COLS; c++)
+            if (g->grid[r][c] == CELL_VILLAGE)
+                g->fogVisible[r][c] = true;
+
+    /* Kulelerden görüş açığı (kule menzili / CELL_SIZE = görüş yarıçapı hücre) */
+    for (int i = 0; i < MAX_TOWERS; i++) {
+        Tower *t = &g->towers[i];
+        if (!t->active) continue;
+        int cr = t->gridY, cc = t->gridX;
+        int vr = (int)(t->range / CELL_SIZE) + 1;
+        for (int dr = -vr; dr <= vr; dr++) {
+            for (int dc = -vr; dc <= vr; dc++) {
+                int nr = cr + dr, nc = cc + dc;
+                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+                if (dr*dr + dc*dc <= vr*vr) {
+                    g->fogVisible[nr][nc] = true;
+                    g->fogExplored[nr][nc] = true;
+                }
+            }
+        }
+    }
+
+    /* Dost birimlerden görüş (80px = ~7 hücre) */
+    for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
+        FriendlyUnit *fu = &g->friendlyUnits[i];
+        if (!fu->active) continue;
+        int cr = (int)(fu->position.y) / CELL_SIZE;
+        int cc = (int)(fu->position.x) / CELL_SIZE;
+        int vr = 7;
+        for (int dr = -vr; dr <= vr; dr++) {
+            for (int dc = -vr; dc <= vr; dc++) {
+                int nr = cr + dr, nc = cc + dc;
+                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+                if (dr*dr + dc*dc <= vr*vr) {
+                    g->fogVisible[nr][nc] = true;
+                    g->fogExplored[nr][nc] = true;
+                }
+            }
+        }
+    }
+
+    /* Hero'dan görüş (120px = ~10 hücre) */
+    if (g->hero.alive) {
+        int cr = (int)(g->hero.position.y) / CELL_SIZE;
+        int cc = (int)(g->hero.position.x) / CELL_SIZE;
+        int vr = 10;
+        for (int dr = -vr; dr <= vr; dr++) {
+            for (int dc = -vr; dc <= vr; dc++) {
+                int nr = cr + dr, nc = cc + dc;
+                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+                if (dr*dr + dc*dc <= vr*vr) {
+                    g->fogVisible[nr][nc] = true;
+                    g->fogExplored[nr][nc] = true;
+                }
+            }
+        }
+    }
+}
+
+/* Fog overlay: karanlık hücrelere yarı saydam siyah dikdörtgen çizer. */
+void DrawFogOverlay(Game *g) {
+    for (int r = 0; r < GRID_ROWS; r++) {
+        for (int c = 0; c < GRID_COLS; c++) {
+            if (g->fogVisible[r][c]) continue; /* Görünür: fog yok */
+            int x = GRID_OFFSET_X + c * CELL_SIZE;
+            int y = GRID_OFFSET_Y + r * CELL_SIZE;
+            if (g->fogExplored[r][c]) {
+                /* Keşfedilmiş ama şu an görünmüyor: hafif sis (%55) */
+                DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, (Color){7, 7, 10, 140});
+            } else {
+                /* Hiç keşfedilmemiş: koyu karanlık (%78) */
+                DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, (Color){7, 7, 10, 200});
+            }
+        }
+    }
+}
+
+/* ============================================================
+ * T70 — Minimap (ekranın sol altında, 200×120 px)
+ * ============================================================ */
+
+void DrawMinimap(Game *g) {
+    int mmW = 200, mmH = 130;
+    int mmX = 10, mmY = SCREEN_HEIGHT - mmH - 10;
+    float scaleX = (float)mmW / (GRID_COLS * CELL_SIZE);
+    float scaleY = (float)mmH / (GRID_ROWS * CELL_SIZE);
+
+    /* Arka plan */
+    DrawRectangle(mmX - 2, mmY - 2, mmW + 4, mmH + 4, (Color){200, 175, 80, 200});
+    DrawRectangle(mmX, mmY, mmW, mmH, (Color){7, 7, 10, 220});
+
+    /* Grid hücreleri */
+    for (int r = 0; r < GRID_ROWS; r++) {
+        for (int c = 0; c < GRID_COLS; c++) {
+            int px = mmX + (int)(c * CELL_SIZE * scaleX);
+            int py = mmY + (int)(r * CELL_SIZE * scaleY);
+            int pw = (int)(CELL_SIZE * scaleX) + 1;
+            int ph = (int)(CELL_SIZE * scaleY) + 1;
+            Color mc;
+            if (!g->fogExplored[r][c]) continue; /* Keşfedilmemiş: çizme */
+            switch (g->grid[r][c]) {
+                case CELL_PATH:      mc = (Color){160, 130, 90, 200}; break;
+                case CELL_BUILDABLE: mc = (Color){50, 80, 50, 150}; break;
+                case CELL_TOWER:     mc = (Color){60, 120, 200, 255}; break;
+                case CELL_VILLAGE:   mc = (Color){200, 160, 80, 255}; break;
+                default:             mc = (Color){25, 40, 25, 100}; break;
+            }
+            DrawRectangle(px, py, pw, ph, mc);
+        }
+    }
+
+    /* Düşmanlar (kırmızı noktalar — sadece görünürse) */
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *e = &g->enemies[i];
+        if (!e->active) continue;
+        int er = (int)(e->position.y) / CELL_SIZE;
+        int ec = (int)(e->position.x) / CELL_SIZE;
+        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS && g->fogVisible[er][ec]) {
+            int ex = mmX + (int)(e->position.x * scaleX);
+            int ey = mmY + (int)(e->position.y * scaleY);
+            DrawCircle(ex, ey, 2, RED);
+        }
+    }
+
+    /* Kamera viewport çerçevesi */
+    float camL = g->camera.cam.target.x - (SCREEN_WIDTH / 2.0f) / g->camera.zoom;
+    float camT = g->camera.cam.target.y - (SCREEN_HEIGHT / 2.0f) / g->camera.zoom;
+    float camW = SCREEN_WIDTH / g->camera.zoom;
+    float camH = SCREEN_HEIGHT / g->camera.zoom;
+    DrawRectangleLines(
+        mmX + (int)(camL * scaleX),
+        mmY + (int)(camT * scaleY),
+        (int)(camW * scaleX),
+        (int)(camH * scaleY),
+        WHITE);
+}
+
+/* ============================================================
  * DrawGame — Ana Çizim Sırası (T08 + Katmanlar)
  * ============================================================ */
 
@@ -2938,11 +3246,23 @@ void DrawGame(Game *g) {
     DrawPlacementPreview(g);
     DrawTowerSynergies(g);
     DrawTowers(g);
-    DrawFriendlyUnits(g);   /* Dost birimler dusmanlarin altinda */
+    DrawFriendlyUnits(g);
     DrawEnemies(g);
     DrawProjectiles(g);
     DrawParticles(g);
     DrawFloatingTexts(g);
+    DrawFogOverlay(g);  /* T70 — Fog en üstte */
+
+    /* T65 — Seçim kutusu çizimi (dünya koordinatı) */
+    if (g->isSelecting) {
+        Vector2 ws = GetScreenToWorld2D(g->selectionStart, g->camera.cam);
+        Vector2 we = GetScreenToWorld2D(g->selectionEnd, g->camera.cam);
+        float sx = fminf(ws.x, we.x), sy = fminf(ws.y, we.y);
+        float sw = fabsf(we.x - ws.x), sh = fabsf(we.y - ws.y);
+        DrawRectangle((int)sx, (int)sy, (int)sw, (int)sh, (Color){100, 255, 100, 40});
+        DrawRectangleLines((int)sx, (int)sy, (int)sw, (int)sh, (Color){180, 255, 180, 180});
+    }
+
     DrawContextMenu(g);
 }
 
@@ -3474,6 +3794,7 @@ int main(void) {
                 UpdateFloatingTexts(&game, dt);
                 UpdateScreenShake(&game, rawDt);
                 UpdateGameCamera(&game, rawDt);
+                UpdateFogOfWar(&game); /* T70 */
                 UpdateWaves(&game, dt);
                 UpdateHomeCity(&game.homeCity, dt);
                 CheckGameConditions(&game);
@@ -3585,6 +3906,7 @@ int main(void) {
                         DrawGame(&game);
                     EndMode2D();
                     DrawHUD(&game);
+                    DrawMinimap(&game); /* T70 — Minimap (ekran koordinatı) */
                     break;
                 }
                 case STATE_WAVE_CLEAR: {
