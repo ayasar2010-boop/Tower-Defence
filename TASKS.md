@@ -115,8 +115,8 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 
 - [x] **T52** — **Hero Sınıf Seçimi:** Menüye Warrior/Mage/Archer seçim ekranı ekle. `HeroClass` enum + sınıfa göre başlangıç stat tablosu (HP/Mana/Atk/Def/Speed). Seçim ana menüden LOADING'e geçişte kalıcı olsun.
 - [x] **T53** — **Gelişmiş Hero Struct:** Mevcut `Hero`'yu genişlet: `HeroClass`, `HeroState`, `HeroStats` (base + current), XP/Level sistemi (`AddXP`, `xpToNext`), `comboCount/comboTimer`, `invulnTimer`, `bodyAngle`, animasyon alanları.
-- [ ] **T54** — **Skill Sistemi (Q/W/E/R):** `Skill` struct tanımla. Her sınıf için 4 aktif + 2 pasif skill. Q/W/E/R ile kullanım, mana kontrolü, cooldown, AoE/single-target ayrımı. Skill cooldown overlay HUD'da göster.
-- [ ] **T55** — **Boss Sistemi:** `Boss` struct + `BossPhase` + `BossState` state machine. Her 10 dalgada boss wave. 3 faz geçişi (HP %60/%25). Özel saldırılar (radyal mermi, meteor, minion çağırma). Boss HP bar + nabız/glow çizimi.
+- [x] **T54** — **Skill Sistemi (Q/W/E/R):** `Skill` struct tanımla. Her sınıf için 4 aktif + 2 pasif skill. Q/W/E/R ile kullanım, mana kontrolü, cooldown, AoE/single-target ayrımı. Skill cooldown overlay HUD'da göster.
+- [x] **T55** — **Boss Sistemi:** `Boss` struct + `BossPhase` + `BossState` state machine. Her 10 dalgada boss wave. 3 faz geçişi (HP %60/%25). Özel saldırılar (radyal mermi, meteor, minion çağırma). Boss HP bar + nabız/glow çizimi.
 
 ## AŞAMA 13 — GÖRSEL EFEKTLERİN GELİŞTİRİLMESİ (guidance.md §8)
 
@@ -126,9 +126,9 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 
 ## AŞAMA 14 — GAMEPLAY DERİNLİĞİ (guidance.md §9, §7, §4)
 
-- [ ] **T59** — **Kule Sinerji Sistemi:** Kule yerleştirilirken 120px içindeki diğer kuleleri tara. Tip çiftlerine göre bonus uygula (BASIC+BASIC → +15% atış hızı vb.). Sinerji çiftleri arası soluk mavi çizgi çiz.
-- [ ] **T60** — **Harita Etkileşimleri:** `Interactable` struct + `InteractableType` enum. Hazine sandığı, sunak, iyileştirme kuyusu. Hero yaklaştığında tooltip, E ile etkileşim. Haritaya sabit konumlarda yerleştir.
-- [ ] **T61** — **Gelişmiş Envanter UI:** Mevcut `Inventory`'yi 12 slot grid'e yükselt. `Item` struct (tip, adet, hotkey). `I` tuşu ile panel aç/kapat. Shift+1-6 hızlı kullanım. Slot tooltip.
+- [x] **T59** — **Kule Sinerji Sistemi:** Kule yerleştirilirken 120px içindeki diğer kuleleri tara. Tip çiftlerine göre bonus uygula (BASIC+BASIC → +15% atış hızı vb.). Sinerji çiftleri arası soluk mavi çizgi çiz.
+- [x] **T60** — **Harita Etkileşimleri:** `Interactable` struct + `InteractableType` enum. Hazine sandığı, sunak, iyileştirme kuyusu. Hero yaklaştığında tooltip, E ile etkileşim. Haritaya sabit konumlarda yerleştir.
+- [x] **T61** — **Gelişmiş Envanter UI:** Mevcut `Inventory`'yi 12 slot grid'e yükselt. `Item` struct (tip, adet, hotkey). `I` tuşu ile panel aç/kapat. Shift+1-6 hızlı kullanım. Slot tooltip.
 
 ## AŞAMA 15 — GENİŞLETİLMİŞ İÇERİK (guidance.md §13, §10, §12)
 
@@ -140,9 +140,9 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 
 | Aşama                        | Toplam | Tamamlanan |
 |------------------------------|--------|------------|
-| 12 — Hero RPG Sistemi        | 4      | 0          |
-| 13 — Görsel Efektler         | 3      | 0          |
-| 14 — Gameplay Derinliği      | 3      | 0          |
-| 15 — Genişletilmiş İçerik    | 3      | 2          |
-| **Toplam (yeni)**            | **13** | **8**      |
+| 12 — Hero RPG Sistemi        | 4      | 4          |
+| 13 — Görsel Efektler         | 3      | 3          |
+| 14 — Gameplay Derinliği      | 3      | 3          |
+| 15 — Genişletilmiş İçerik    | 3      | 3          |
+| **Toplam (yeni)**            | **13** | **13**     |
 

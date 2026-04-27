@@ -79,6 +79,7 @@ typedef enum {
     ENEMY_NORMAL,
     ENEMY_FAST,
     ENEMY_TANK,
+    ENEMY_BOSS,
     ENEMY_TYPE_COUNT
 } EnemyType;
 
@@ -163,6 +164,12 @@ typedef struct {
     bool     active;
     bool     isFlying;           /* true → dost birimleri atlar */
     int      engagedFriendlyIdx; /* Savastigi dost birimin indeksi, -1 = yok */
+    bool     isBoss;             /* T55 */
+    int      bossPhase;          /* 1, 2, 3 */
+    float    abilityTimer;       /* T55 */
+    bool     isCasting;          /* T55 Boss cast state */
+    float    castTimer;
+    Vector2  targetAbilityPos;   /* T55 Meteor warning center */
 } Enemy;
 
 typedef struct {
@@ -193,6 +200,7 @@ typedef struct {
     TowerType sourceType;
     Color     color;
     bool      active;
+    bool      isEnemyProjectile;  /* T55 — Boss projectiles hit towers/allies */
     /* T58 — mermi kuyruk efekti */
     Vector2   trailPositions[TRAIL_LENGTH];
     int       trailIndex;
@@ -750,7 +758,7 @@ void InitWaves(Game *g) {
     SetWave2(&w[ 7], ENEMY_TANK,    6, ENEMY_NORMAL, 6, 1.2f, 2.0f, 1.4f, 60, "Demir Duvar");
     SetWave3(&w[ 8], ENEMY_NORMAL, 10, ENEMY_FAST, 6, ENEMY_TANK, 3, 0.7f, 2.0f, 1.5f, 70, "Son Hazirlik");
     /* ─── BOSS DALGASI 10 ─────────────────────────────────── */
-    SetWave2(&w[ 9], ENEMY_TANK,    1, ENEMY_NORMAL, 4, 1.0f, 3.0f, 5.0f, 150, "* GOLEM KRAL *");
+    SetWave2(&w[ 9], ENEMY_BOSS,    1, ENEMY_NORMAL, 4, 1.0f, 3.0f, 5.0f, 150, "* GOLEM KRAL *");
     w[9].isBossWave = true;
     /* ─── BÖLÜM 2 (Dalga 11-19) ──────────────────────────── */
     SetWave1(&w[10], ENEMY_NORMAL, 20, 0.5f, 2.0f, 1.7f,  80, "Sessiz Tehdit");
@@ -763,7 +771,7 @@ void InitWaves(Game *g) {
     SetWave3(&w[17], ENEMY_TANK,    8, ENEMY_FAST, 8, ENEMY_NORMAL, 8, 0.5f, 2.0f, 2.2f, 150, "Elit Birlikleri");
     SetWave3(&w[18], ENEMY_NORMAL, 10, ENEMY_FAST, 10, ENEMY_TANK, 10, 0.4f, 2.0f, 2.5f, 180, "Son Savunma");
     /* ─── FINAL BOSS DALGASI 20 ───────────────────────────── */
-    SetWave3(&w[19], ENEMY_TANK,    1, ENEMY_NORMAL, 10, ENEMY_FAST, 5, 0.5f, 3.0f, 8.0f, 300, "* KARANLIK LORD *");
+    SetWave3(&w[19], ENEMY_BOSS,    1, ENEMY_NORMAL, 10, ENEMY_FAST, 5, 0.5f, 3.0f, 8.0f, 300, "* KARANLIK LORD *");
     w[19].isBossWave = true;
 
     g->totalWaves   = MAX_WAVES;
@@ -1376,6 +1384,18 @@ void SpawnEnemy(Game *g, EnemyType type, float hpMult) {
                 e->radius  = 14.0f;
                 e->color   = DARKPURPLE;
                 break;
+            case ENEMY_BOSS:
+                e->maxHp   = ENEMY_BASE_HP * 20.0f * hpMult;
+                e->speed   = ENEMY_BASE_SPEED * 0.4f;
+                e->radius  = 22.0f;
+                e->color   = MAROON;
+                e->isBoss  = true;
+                e->bossPhase = 1;
+                e->abilityTimer = 3.0f;
+                e->isCasting = false;
+                e->castTimer = 0.0f;
+                e->targetAbilityPos = (Vector2){0,0};
+                break;
             default: break;
         }
         e->currentHp = e->maxHp;
@@ -1461,6 +1481,109 @@ void UpdateEnemies(Game *g, float dt) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->active) continue;
+
+        /* T55 - Boss Yetenek ve Faz Mantığı */
+        if (e->isBoss) {
+            float hpRatio = e->currentHp / e->maxHp;
+            if (e->bossPhase == 1 && hpRatio <= 0.6f) {
+                e->bossPhase = 2;
+                e->color = MAGENTA;
+                TriggerScreenShake(g, 5.0f);
+            } else if (e->bossPhase == 2 && hpRatio <= 0.25f) {
+                e->bossPhase = 3;
+                e->color = PINK;
+                e->speed *= 1.5f; /* Phase 3: Çılgınlık */
+                TriggerScreenShake(g, 8.0f);
+            }
+
+            if (e->isCasting) {
+                e->castTimer -= dt;
+                if (e->castTimer <= 0.0f) {
+                    /* Yeteneği ateşle */
+                    e->isCasting = false;
+                    if (e->bossPhase == 1) {
+                        /* Radyal Mermi */
+                        for (int a = 0; a < 8; a++) {
+                            float angle = a * 45.0f * DEG2RAD;
+                            Vector2 dir = {cosf(angle), sinf(angle)};
+                            for (int pidx = 0; pidx < MAX_PROJECTILES; pidx++) {
+                                if (g->projectiles[pidx].active) continue;
+                                Projectile *p = &g->projectiles[pidx];
+                                p->position = e->position;
+                                p->velocity = Vec2Scale(dir, 150.0f);
+                                p->damage = 20.0f;
+                                p->splashRadius = 0.0f;
+                                p->speed = 150.0f;
+                                p->targetIndex = -1;
+                                p->sourceType = TOWER_BASIC; /* dummy */
+                                p->color = MAGENTA;
+                                p->active = true;
+                                p->isEnemyProjectile = true;
+                                p->trailIndex = 0;
+                                for (int j=0; j<TRAIL_LENGTH; j++) p->trailPositions[j] = p->position;
+                                break;
+                            }
+                        }
+                        e->abilityTimer = 4.0f;
+                    } else if (e->bossPhase == 2) {
+                        /* Meteor: targetAbilityPos noktasına patlama */
+                        TriggerScreenShake(g, 6.0f);
+                        SpawnParticles(g, e->targetAbilityPos, ORANGE, 30, 200.0f, 1.0f);
+                        /* Kuleleri stunla */
+                        for (int tidx = 0; tidx < MAX_TOWERS; tidx++) {
+                            if (!g->towers[tidx].active) continue;
+                            if (Vec2Distance(g->towers[tidx].position, e->targetAbilityPos) < 100.0f) {
+                                g->towers[tidx].fireCooldown += 3.0f; /* 3 sn stun */
+                            }
+                        }
+                        /* Dost birimlere hasar */
+                        for (int fidx = 0; fidx < MAX_FRIENDLY_UNITS; fidx++) {
+                            if (!g->friendlyUnits[fidx].active) continue;
+                            if (Vec2Distance(g->friendlyUnits[fidx].position, e->targetAbilityPos) < 100.0f) {
+                                g->friendlyUnits[fidx].hp -= 50.0f;
+                            }
+                        }
+                        /* Hero'ya hasar (eğer sahadaysa) */
+                        if (g->hero.alive && Vec2Distance(g->hero.position, e->targetAbilityPos) < 100.0f) {
+                            g->hero.stats.hp -= 50.0f;
+                        }
+                        e->abilityTimer = 6.0f;
+                    } else if (e->bossPhase == 3) {
+                        /* Minion Çağırma */
+                        SpawnEnemy(g, ENEMY_TANK, 0.6f);
+                        SpawnEnemy(g, ENEMY_FAST, 1.0f);
+                        SpawnEnemy(g, ENEMY_FAST, 1.0f);
+                        e->abilityTimer = 4.0f;
+                    }
+                }
+                /* Cast yaparken hareket etme */
+                continue;
+            } else {
+                e->abilityTimer -= dt;
+                if (e->abilityTimer <= 0.0f) {
+                    e->isCasting = true;
+                    if (e->bossPhase == 1) {
+                        e->castTimer = 1.0f;
+                    } else if (e->bossPhase == 2) {
+                        e->castTimer = 1.5f;
+                        /* Rastgele bir kule seç */
+                        e->targetAbilityPos = e->position; /* default */
+                        int activeTowers[MAX_TOWERS];
+                        int tCount = 0;
+                        for(int tidx = 0; tidx < MAX_TOWERS; tidx++) {
+                            if (g->towers[tidx].active) activeTowers[tCount++] = tidx;
+                        }
+                        if (tCount > 0) {
+                            e->targetAbilityPos = g->towers[activeTowers[GetRandomValue(0, tCount-1)]].position;
+                        } else if (g->hero.alive) {
+                            e->targetAbilityPos = g->hero.position;
+                        }
+                    } else if (e->bossPhase == 3) {
+                        e->castTimer = 0.8f;
+                    }
+                }
+            }
+        }
 
         /* Son waypoint gecildi: can kaybet */
         if (e->currentWaypoint >= g->waypointCount) {
@@ -1576,7 +1699,7 @@ void UpdateProjectiles(Game *g, float dt) {
         if (!p->active) continue;
 
         Enemy *target = NULL;
-        if (p->targetIndex >= 0 && p->targetIndex < MAX_ENEMIES)
+        if (!p->isEnemyProjectile && p->targetIndex >= 0 && p->targetIndex < MAX_ENEMIES)
             target = &g->enemies[p->targetIndex];
 
         /* T58 — kuyruk: mevcut pozisyonu kaydet */
@@ -1593,6 +1716,36 @@ void UpdateProjectiles(Game *g, float dt) {
         if (p->position.x < 0 || p->position.x > SCREEN_WIDTH ||
             p->position.y < 0 || p->position.y > SCREEN_HEIGHT) {
             p->active = false;
+            continue;
+        }
+
+        /* Düşman Mermisi Kontrolü (Boss Phase 1 vb.) */
+        if (p->isEnemyProjectile) {
+            bool hit = false;
+            /* Kulelere isabet kontrolü */
+            for (int t = 0; t < MAX_TOWERS; t++) {
+                if (!g->towers[t].active) continue;
+                if (Vec2Distance(p->position, g->towers[t].position) < 20.0f) {
+                    g->towers[t].fireCooldown += 2.0f; /* 2 sn stun */
+                    hit = true;
+                }
+            }
+            /* Dost birimlere isabet kontrolü */
+            for (int f = 0; f < MAX_FRIENDLY_UNITS; f++) {
+                if (!g->friendlyUnits[f].active) continue;
+                if (Vec2Distance(p->position, g->friendlyUnits[f].position) < 15.0f) {
+                    g->friendlyUnits[f].hp -= p->damage;
+                    hit = true;
+                }
+            }
+            if (g->hero.alive && Vec2Distance(p->position, g->hero.position) < 15.0f) {
+                g->hero.stats.hp -= p->damage;
+                hit = true;
+            }
+            if (hit) {
+                SpawnParticles(g, p->position, p->color, 5, 80.0f, 0.2f);
+                p->active = false;
+            }
             continue;
         }
 
@@ -2393,7 +2546,18 @@ void DrawEnemies(Game *g) {
          *                  frameRect, e->position, WHITE)
          * frameRect: e->animFrame * frameW ile yürüyüş animasyon karesi seçilir */
         switch (e->type) {
+            case ENEMY_BOSS:
             case ENEMY_NORMAL:
+                if (e->isBoss) {
+                    /* Nabız efekti */
+                    float pulse = 1.0f + sinf((float)GetTime() * 4.0f) * 0.2f;
+                    if (e->isCasting) {
+                        pulse += 0.5f; /* Büyü hazırlığı: ekstra parlama */
+                        DrawCircleGradient((int)e->position.x, (int)e->position.y, e->radius * 2.0f * pulse, WHITE, BLANK);
+                    } else {
+                        DrawCircleGradient((int)e->position.x, (int)e->position.y, e->radius * 1.5f * pulse, e->color, BLANK);
+                    }
+                }
                 DrawCircleV(e->position, e->radius, e->color);
                 DrawCircleLines((int)e->position.x, (int)e->position.y, e->radius, WHITE);
                 break;
@@ -2417,8 +2581,15 @@ void DrawEnemies(Game *g) {
             default: break;
         }
 
-        /* HP bar — sadece hasar almışsa göster */
-        if (e->currentHp < e->maxHp) {
+        /* T55 — Boss yetenek görsel efektleri (Meteor uyarı dairesi vb.) */
+        if (e->isBoss && e->isCasting && e->bossPhase == 2) {
+            float blink = (int)(GetTime() * 10) % 2 == 0 ? 0.8f : 0.4f;
+            DrawCircleLines((int)e->targetAbilityPos.x, (int)e->targetAbilityPos.y, 100.0f, Fade(RED, blink));
+            DrawCircle((int)e->targetAbilityPos.x, (int)e->targetAbilityPos.y, 100.0f, Fade(RED, blink * 0.3f));
+        }
+
+        /* HP bar — sadece hasar almışsa göster (Boss ise HUD'a havâle et) */
+        if (!e->isBoss && e->currentHp < e->maxHp) {
             float barW = e->radius * 2.5f;
             float barH = 4.0f;
             float barX = e->position.x - barW / 2.0f;
@@ -2629,6 +2800,32 @@ void DrawHUD(Game *g) {
                            isBoss ? (Color){255, 200, 0, fa} : (Color){160, 160, 160, fa});
         DrawText(bannerBuf, bx + 15, by + (isBoss ? 8 : 6),
                  isBoss ? 28 : 22, isBoss ? (Color){255, 220, 0, fa} : (Color){255, 255, 255, fa});
+    }
+
+    /* T55 — Boss HP Bar (Eğer haritada aktif boss varsa) */
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        Enemy *e = &g->enemies[i];
+        if (e->active && e->isBoss) {
+            int bbw = 500;
+            int bbh = 20;
+            int bbx = SCREEN_WIDTH / 2 - bbw / 2;
+            int bby = 65; 
+            
+            /* Nabız border */
+            float pulse = 1.0f + sinf((float)GetTime() * 5.0f) * 0.5f;
+            DrawRectangle(bbx - 4, bby - 4, bbw + 8, bbh + 8, (Color){30, 0, 0, (unsigned char)(200 * pulse)});
+            
+            DrawRectangle(bbx, bby, bbw, bbh, (Color){40, 40, 40, 240});
+            float bossRatio = e->currentHp / e->maxHp;
+            DrawRectangle(bbx, bby, (int)(bbw * bossRatio), bbh, MAROON);
+            DrawRectangleLines(bbx, bby, bbw, bbh, GOLD);
+            
+            char tbuf[64];
+            snprintf(tbuf, sizeof(tbuf), "BOSS: %s (Faz %d) - %.0f/%.0f", 
+                     g->waves[g->currentWave].waveName, e->bossPhase, e->currentHp, e->maxHp);
+            DrawText(tbuf, bbx + bbw/2 - MeasureText(tbuf, 16)/2, bby + 2, 16, WHITE);
+            break; /* Tek boss varsayımı */
+        }
     }
 
     /* T41 — Home City UI */
