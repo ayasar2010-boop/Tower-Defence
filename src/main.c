@@ -25,6 +25,11 @@
 #define CELL_SIZE               12
 #define GRID_OFFSET_X           0
 #define GRID_OFFSET_Y           0
+/* İzometrik koordinat sabitleri */
+#define ISO_HALF_W   CELL_SIZE                      /* diamond yarı-genişlik = 12 */
+#define ISO_HALF_H   (CELL_SIZE / 2)                /* diamond yarı-yükseklik = 6  */
+#define ISO_ORIGIN_X (GRID_ROWS * ISO_HALF_W)       /* 960 — sol kenar referans noktası */
+#define ISO_ORIGIN_Y 20                             /* üst kenar boşluğu */
 
 #define MAX_ENEMIES             50
 #define MAX_TOWERS              30
@@ -623,21 +628,23 @@ float   Vec2Length(Vector2 v)              { return sqrtf(v.x*v.x + v.y*v.y); }
  * KOORDİNAT DÖNÜŞÜM FONKSİYONLARI
  * ============================================================ */
 
-/* Grid indeksinden hücrenin merkez piksel koordinatını hesaplar. */
+/* Grid indeksinden izometrik merkez koordinatini hesaplar. */
 Vector2 GridToWorld(int gx, int gy) {
     return (Vector2){
-        GRID_OFFSET_X + gx * CELL_SIZE + CELL_SIZE / 2.0f,
-        GRID_OFFSET_Y + gy * CELL_SIZE + CELL_SIZE / 2.0f
+        (float)(ISO_ORIGIN_X + (gx - gy) * ISO_HALF_W),
+        (float)(ISO_ORIGIN_Y + (gx + gy) * ISO_HALF_H)
     };
 }
 
-/* Piksel koordinatını grid indeksine çevirir; grid dışındaysa false döner. */
+/* Izometrik dunya koordinatini grid indeksine cevirir; grid disindaysa false doner. */
 bool WorldToGrid(Vector2 wp, int *gx, int *gy) {
-    int ix = (int)((wp.x - GRID_OFFSET_X) / CELL_SIZE);
-    int iy = (int)((wp.y - GRID_OFFSET_Y) / CELL_SIZE);
-    if (ix < 0 || ix >= GRID_COLS || iy < 0 || iy >= GRID_ROWS) return false;
-    *gx = ix;
-    *gy = iy;
+    float dx = wp.x - (float)ISO_ORIGIN_X;
+    float dy = wp.y - (float)ISO_ORIGIN_Y;
+    int col = (int)floorf((dx / (float)ISO_HALF_W + dy / (float)ISO_HALF_H) * 0.5f + 0.5f);
+    int row = (int)floorf((dy / (float)ISO_HALF_H - dx / (float)ISO_HALF_W) * 0.5f + 0.5f);
+    if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return false;
+    *gx = col;
+    *gy = row;
     return true;
 }
 
@@ -747,8 +754,8 @@ void InitWaypoints(Game *g) {
         g->waypoints[i] = GridToWorld(wp[i][0], wp[i][1]);
         g->waypointCount++;
     }
-    /* İlk waypoint spawn noktasını harita dışına kaydır */
-    g->waypoints[0].x = -CELL_SIZE * 2.0f;
+    /* Ilk waypoint spawn noktasini izometrik haritanin sol disina kaydir */
+    g->waypoints[0].x -= (float)(ISO_HALF_W * 8);
 }
 
 /* ============================================================
@@ -1152,10 +1159,10 @@ void InitGame(Game *g) {
     InitSiegeMechanics(&g->siege);
     g->selectedBuilding = BUILDING_BARRACKS;
     g->selectedBuildingType = -1;
-    /* T69 — Kamera: yakın görünüm, yolun başlangıcına merkezle */
+    /* T69 — Kamera: yakin gorunum, yolun ilk kösesine merkezle */
     g->camera.zoom = 1.8f;
     g->camera.cam.zoom = 1.8f;
-    g->camera.cam.target = (Vector2){0, 10 * CELL_SIZE};
+    g->camera.cam.target = GridToWorld(25, 10);
     g->camera.cam.offset = (Vector2){SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
     g->camera.heroFollow = false;
     InitUI(SCREEN_WIDTH);
@@ -1510,12 +1517,9 @@ int FindNearestEnemy(Game *g, Vector2 pos, float range) {
     int   bestIdx  = -1;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!g->enemies[i].active) continue;
-        /* T70 — Fogdaki düşmanlara vurulamaz */
-        int er = (int)(g->enemies[i].position.y) / CELL_SIZE;
-        int ec = (int)(g->enemies[i].position.x) / CELL_SIZE;
-        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS) {
-            if (!g->fogVisible[er][ec]) continue;
-        }
+        /* T70 — Fogdaki dusmanlara vurulamaz */
+        { int ec, er;
+          if (WorldToGrid(g->enemies[i].position, &ec, &er) && !g->fogVisible[er][ec]) continue; }
         float d = Vec2Distance(pos, g->enemies[i].position);
         if (d <= range && d < minDist) {
             minDist = d;
@@ -2091,15 +2095,17 @@ void UpdateGameCamera(Game *g, float dt) {
     /* Kamera offset = ekran merkezi */
     gc->cam.offset = (Vector2){SCREEN_WIDTH / 2.0f, SCREEN_HEIGHT / 2.0f};
 
-    /* Harita sınırlarına klample */
-    float worldW = (float)(GRID_COLS * CELL_SIZE);
-    float worldH = (float)(GRID_ROWS * CELL_SIZE);
-    float halfViewW = (SCREEN_WIDTH / 2.0f) / gc->zoom;
+    /* Izometrik harita sinirlarina klample */
+    float isoMinX = (float)(ISO_ORIGIN_X - GRID_ROWS * ISO_HALF_W);
+    float isoMaxX = (float)(ISO_ORIGIN_X + GRID_COLS * ISO_HALF_W);
+    float isoMinY = (float)ISO_ORIGIN_Y;
+    float isoMaxY = (float)(ISO_ORIGIN_Y + (GRID_COLS + GRID_ROWS) * ISO_HALF_H);
+    float halfViewW = (SCREEN_WIDTH  / 2.0f) / gc->zoom;
     float halfViewH = (SCREEN_HEIGHT / 2.0f) / gc->zoom;
-    if (gc->cam.target.x < halfViewW) gc->cam.target.x = halfViewW;
-    if (gc->cam.target.y < halfViewH) gc->cam.target.y = halfViewH;
-    if (gc->cam.target.x > worldW - halfViewW) gc->cam.target.x = worldW - halfViewW;
-    if (gc->cam.target.y > worldH - halfViewH) gc->cam.target.y = worldH - halfViewH;
+    if (gc->cam.target.x < isoMinX + halfViewW) gc->cam.target.x = isoMinX + halfViewW;
+    if (gc->cam.target.y < isoMinY + halfViewH) gc->cam.target.y = isoMinY + halfViewH;
+    if (gc->cam.target.x > isoMaxX - halfViewW) gc->cam.target.x = isoMaxX - halfViewW;
+    if (gc->cam.target.y > isoMaxY - halfViewH) gc->cam.target.y = isoMaxY - halfViewH;
 }
 
 /* ============================================================
@@ -2652,34 +2658,39 @@ void UpdatePause(Game *g) {
 void DrawMap(Game *g) {
     for (int r = 0; r < GRID_ROWS; r++) {
         for (int c = 0; c < GRID_COLS; c++) {
-            int x = GRID_OFFSET_X + c * CELL_SIZE;
-            int y = GRID_OFFSET_Y + r * CELL_SIZE;
             Color fill;
             switch (g->grid[r][c]) {
                 case CELL_PATH:      fill = (Color){160, 130, 90, 255}; break;
                 case CELL_BUILDABLE: fill = (Color){50,  80,  50, 255}; break;
                 case CELL_TOWER:     fill = (Color){40,  60,  40, 255}; break;
-                case CELL_RURAL:     fill = (Color){38,  55,  28, 255}; break;  /* T67 Koyu çayır */
-                case CELL_VILLAGE:   fill = (Color){90,  70,  45, 255}; break;  /* T68 Köy zemini */
+                case CELL_RURAL:     fill = (Color){38,  55,  28, 255}; break;
+                case CELL_VILLAGE:   fill = (Color){90,  70,  45, 255}; break;
                 default:             fill = (Color){30,  50,  30, 255}; break;
             }
-            DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, fill);
+            /* Izometrik diamond tile — 2 ucgen */
+            Vector2 ctr   = GridToWorld(c, r);
+            Vector2 top   = {ctr.x,                   ctr.y - (float)ISO_HALF_H};
+            Vector2 right = {ctr.x + (float)ISO_HALF_W, ctr.y                  };
+            Vector2 bot   = {ctr.x,                   ctr.y + (float)ISO_HALF_H};
+            Vector2 left  = {ctr.x - (float)ISO_HALF_W, ctr.y                  };
+            DrawTriangle(top, left, right, fill);
+            DrawTriangle(right, left, bot, fill);
 
-            /* T68 — Köy hücrelerine mini ev çiz */
+            /* T68 — Koy hucrelerine kucuk cati imi */
             if (g->grid[r][c] == CELL_VILLAGE) {
-                int hx = x + CELL_SIZE/4, hy = y + CELL_SIZE/4;
-                int hw = CELL_SIZE/2, hh = CELL_SIZE/3;
-                DrawRectangle(hx, hy + hh/2, hw, hh/2, (Color){120, 90, 55, 255});
-                /* Çatı (üçgen) */
                 DrawTriangle(
-                    (Vector2){(float)(hx + hw/2), (float)hy},
-                    (Vector2){(float)hx, (float)(hy + hh/2)},
-                    (Vector2){(float)(hx + hw), (float)(hy + hh/2)},
-                    (Color){180, 60, 40, 255});
+                    (Vector2){ctr.x, ctr.y - (float)ISO_HALF_H * 2.2f},
+                    left, right,
+                    (Color){180, 60, 40, 220});
             }
 
-            if (g->showGrid)
-                DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, (Color){255, 255, 255, 25});
+            if (g->showGrid) {
+                Color gl = (Color){255, 255, 255, 18};
+                DrawLineV(top, right, gl);
+                DrawLineV(right, bot, gl);
+                DrawLineV(bot, left, gl);
+                DrawLineV(left, top, gl);
+            }
         }
     }
 }
@@ -2694,12 +2705,9 @@ void DrawEnemies(Game *g) {
         Enemy *e = &g->enemies[i];
         if (!e->active) continue;
 
-        /* T70 — Fogdaki düşmanlar çizilmez */
-        int er = (int)(e->position.y) / CELL_SIZE;
-        int ec = (int)(e->position.x) / CELL_SIZE;
-        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS) {
-            if (!g->fogVisible[er][ec]) continue;
-        }
+        /* T70 — Fogdaki dusmanlar cizilmez */
+        { int ec, er;
+          if (WorldToGrid(e->position, &ec, &er) && !g->fogVisible[er][ec]) continue; }
 
         /* Şekil: Normal=daire, Fast=üçgen, Tank=kare
          * TODO (sprite): DrawTextureRec(g->assets.enemyNormal/Fast/Tank,
@@ -2861,10 +2869,16 @@ void DrawPlacementPreview(Game *g) {
 
     bool canPlace = CanPlaceTower(g, gx, gy);
     Color previewColor = canPlace ? (Color){0, 255, 0, 80} : (Color){255, 0, 0, 80};
-    int x = GRID_OFFSET_X + gx * CELL_SIZE;
-    int y = GRID_OFFSET_Y + gy * CELL_SIZE;
-    DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, previewColor);
-    DrawRectangleLines(x, y, CELL_SIZE, CELL_SIZE, canPlace ? GREEN : RED);
+    Color edgeColor    = canPlace ? GREEN : RED;
+    Vector2 ctr   = GridToWorld(gx, gy);
+    Vector2 ptop  = {ctr.x,                    ctr.y - (float)ISO_HALF_H};
+    Vector2 prght = {ctr.x + (float)ISO_HALF_W, ctr.y                   };
+    Vector2 pbot  = {ctr.x,                    ctr.y + (float)ISO_HALF_H};
+    Vector2 pleft = {ctr.x - (float)ISO_HALF_W, ctr.y                   };
+    DrawTriangle(ptop, pleft, prght, previewColor);
+    DrawTriangle(prght, pleft, pbot, previewColor);
+    DrawLineV(ptop, prght, edgeColor); DrawLineV(prght, pbot, edgeColor);
+    DrawLineV(pbot, pleft, edgeColor); DrawLineV(pleft, ptop, edgeColor);
 
     /* Menzil dairesi */
     float range = 150;
@@ -3121,12 +3135,12 @@ void UpdateFogOfWar(Game *g) {
         }
     }
 
-    /* Dost birimlerden görüş (80px = ~7 hücre) */
+    /* Dost birimlerden gorunum (yaklasik 7 hucre) */
     for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
         FriendlyUnit *fu = &g->friendlyUnits[i];
         if (!fu->active) continue;
-        int cr = (int)(fu->position.y) / CELL_SIZE;
-        int cc = (int)(fu->position.x) / CELL_SIZE;
+        int cc, cr;
+        if (!WorldToGrid(fu->position, &cc, &cr)) continue;
         int vr = 7;
         for (int dr = -vr; dr <= vr; dr++) {
             for (int dc = -vr; dc <= vr; dc++) {
@@ -3140,38 +3154,40 @@ void UpdateFogOfWar(Game *g) {
         }
     }
 
-    /* Hero'dan görüş (120px = ~10 hücre) */
+    /* Hero'dan gorunum (yaklasik 10 hucre) */
     if (g->hero.alive) {
-        int cr = (int)(g->hero.position.y) / CELL_SIZE;
-        int cc = (int)(g->hero.position.x) / CELL_SIZE;
-        int vr = 10;
-        for (int dr = -vr; dr <= vr; dr++) {
-            for (int dc = -vr; dc <= vr; dc++) {
-                int nr = cr + dr, nc = cc + dc;
-                if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
-                if (dr*dr + dc*dc <= vr*vr) {
-                    g->fogVisible[nr][nc] = true;
-                    g->fogExplored[nr][nc] = true;
+        int cc, cr;
+        if (WorldToGrid(g->hero.position, &cc, &cr)) {
+            int vr = 10;
+            for (int dr = -vr; dr <= vr; dr++) {
+                for (int dc = -vr; dc <= vr; dc++) {
+                    int nr = cr + dr, nc = cc + dc;
+                    if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+                    if (dr*dr + dc*dc <= vr*vr) {
+                        g->fogVisible[nr][nc] = true;
+                        g->fogExplored[nr][nc] = true;
+                    }
                 }
             }
         }
     }
 }
 
-/* Fog overlay: karanlık hücrelere yarı saydam siyah dikdörtgen çizer. */
+/* Fog overlay: karanlık hücrelere izometrik diamond sis çizer. */
 void DrawFogOverlay(Game *g) {
     for (int r = 0; r < GRID_ROWS; r++) {
         for (int c = 0; c < GRID_COLS; c++) {
-            if (g->fogVisible[r][c]) continue; /* Görünür: fog yok */
-            int x = GRID_OFFSET_X + c * CELL_SIZE;
-            int y = GRID_OFFSET_Y + r * CELL_SIZE;
-            if (g->fogExplored[r][c]) {
-                /* Keşfedilmiş ama şu an görünmüyor: hafif sis (%55) */
-                DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, (Color){7, 7, 10, 140});
-            } else {
-                /* Hiç keşfedilmemiş: koyu karanlık (%78) */
-                DrawRectangle(x, y, CELL_SIZE, CELL_SIZE, (Color){7, 7, 10, 200});
-            }
+            if (g->fogVisible[r][c]) continue;
+            Color fc = g->fogExplored[r][c]
+                ? (Color){7, 7, 10, 140}
+                : (Color){7, 7, 10, 200};
+            Vector2 ctr   = GridToWorld(c, r);
+            Vector2 ftop  = {ctr.x,                    ctr.y - (float)ISO_HALF_H};
+            Vector2 frght = {ctr.x + (float)ISO_HALF_W, ctr.y                   };
+            Vector2 fbot  = {ctr.x,                    ctr.y + (float)ISO_HALF_H};
+            Vector2 fleft = {ctr.x - (float)ISO_HALF_W, ctr.y                   };
+            DrawTriangle(ftop, fleft, frght, fc);
+            DrawTriangle(frght, fleft, fbot, fc);
         }
     }
 }
@@ -3183,20 +3199,20 @@ void DrawFogOverlay(Game *g) {
 void DrawMinimap(Game *g) {
     int mmW = 200, mmH = 130;
     int mmX = 10, mmY = SCREEN_HEIGHT - mmH - 10;
-    float scaleX = (float)mmW / (GRID_COLS * CELL_SIZE);
-    float scaleY = (float)mmH / (GRID_ROWS * CELL_SIZE);
+    float scaleX = (float)mmW / GRID_COLS;
+    float scaleY = (float)mmH / GRID_ROWS;
 
     /* Arka plan */
     DrawRectangle(mmX - 2, mmY - 2, mmW + 4, mmH + 4, (Color){200, 175, 80, 200});
     DrawRectangle(mmX, mmY, mmW, mmH, (Color){7, 7, 10, 220});
 
-    /* Grid hücreleri */
+    /* Grid hucreleri — ortografik minimap */
     for (int r = 0; r < GRID_ROWS; r++) {
         for (int c = 0; c < GRID_COLS; c++) {
-            int px = mmX + (int)(c * CELL_SIZE * scaleX);
-            int py = mmY + (int)(r * CELL_SIZE * scaleY);
-            int pw = (int)(CELL_SIZE * scaleX) + 1;
-            int ph = (int)(CELL_SIZE * scaleY) + 1;
+            int px = mmX + (int)(c * scaleX);
+            int py = mmY + (int)(r * scaleY);
+            int pw = (int)scaleX + 1;
+            int ph = (int)scaleY + 1;
             Color mc;
             if (!g->fogExplored[r][c]) continue; /* Keşfedilmemiş: çizme */
             switch (g->grid[r][c]) {
@@ -3210,30 +3226,27 @@ void DrawMinimap(Game *g) {
         }
     }
 
-    /* Düşmanlar (kırmızı noktalar — sadece görünürse) */
+    /* Dusmanlar (kirmizi noktalar — sadece gorununce) */
     for (int i = 0; i < MAX_ENEMIES; i++) {
         Enemy *e = &g->enemies[i];
         if (!e->active) continue;
-        int er = (int)(e->position.y) / CELL_SIZE;
-        int ec = (int)(e->position.x) / CELL_SIZE;
-        if (er >= 0 && er < GRID_ROWS && ec >= 0 && ec < GRID_COLS && g->fogVisible[er][ec]) {
-            int ex = mmX + (int)(e->position.x * scaleX);
-            int ey = mmY + (int)(e->position.y * scaleY);
+        int ec, er;
+        if (WorldToGrid(e->position, &ec, &er) && g->fogVisible[er][ec]) {
+            int ex = mmX + (int)(ec * scaleX);
+            int ey = mmY + (int)(er * scaleY);
             DrawCircle(ex, ey, 2, RED);
         }
     }
 
-    /* Kamera viewport çerçevesi */
-    float camL = g->camera.cam.target.x - (SCREEN_WIDTH / 2.0f) / g->camera.zoom;
-    float camT = g->camera.cam.target.y - (SCREEN_HEIGHT / 2.0f) / g->camera.zoom;
-    float camW = SCREEN_WIDTH / g->camera.zoom;
-    float camH = SCREEN_HEIGHT / g->camera.zoom;
-    DrawRectangleLines(
-        mmX + (int)(camL * scaleX),
-        mmY + (int)(camT * scaleY),
-        (int)(camW * scaleX),
-        (int)(camH * scaleY),
-        WHITE);
+    /* Kamera hedefini grid'e cevir ve minimap'te goster */
+    int camGx, camGy;
+    if (WorldToGrid(g->camera.cam.target, &camGx, &camGy)) {
+        int cx = mmX + (int)(camGx * scaleX);
+        int cy = mmY + (int)(camGy * scaleY);
+        int cvw = (int)(SCREEN_WIDTH  / g->camera.zoom * scaleX / (2.0f * (float)ISO_HALF_W));
+        int cvh = (int)(SCREEN_HEIGHT / g->camera.zoom * scaleY / (2.0f * (float)ISO_HALF_H));
+        DrawRectangleLines(cx - cvw, cy - cvh, cvw * 2, cvh * 2, WHITE);
+    }
 }
 
 /* ============================================================
@@ -3726,19 +3739,18 @@ void DrawPrepPhase(Game *g) {
         DrawText(labels[i], 30, 121 + i * 44, 14, sel_colors[i]);
     }
 
-    /* Yerleştirilen binalar */
+    /* Yerlestirilen binalar — izometrik pozisyon */
     for (int i = 0; i < g->buildingCount; i++) {
         Building *b = &g->buildings[i];
         if (!b->active) continue;
-        int px = GRID_OFFSET_X + b->gridX * CELL_SIZE;
-        int py = GRID_OFFSET_Y + b->gridY * CELL_SIZE;
+        Vector2 bp = GridToWorld(b->gridX, b->gridY);
         Color bc = (b->type == BUILDING_BARRACKS) ? GREEN :
                    (b->type == BUILDING_MARKET)   ? SKYBLUE : ORANGE;
-        DrawRectangle(px + 4, py + 4, CELL_SIZE - 8, CELL_SIZE - 8, Fade(bc, 0.55f));
-        DrawRectangleLines(px + 4, py + 4, CELL_SIZE - 8, CELL_SIZE - 8, bc);
+        DrawCircle((int)bp.x, (int)bp.y, (float)ISO_HALF_H * 1.4f, Fade(bc, 0.55f));
+        DrawCircleLines((int)bp.x, (int)bp.y, (float)ISO_HALF_H * 1.4f, bc);
         const char *sym = (b->type == BUILDING_BARRACKS) ? "K" :
                           (b->type == BUILDING_MARKET)   ? "P" : "B";
-        DrawText(sym, px + CELL_SIZE/2 - 5, py + CELL_SIZE/2 - 8, 18, WHITE);
+        DrawText(sym, (int)bp.x - 4, (int)bp.y - 6, 10, WHITE);
     }
 
     /* Siege duvarları */
