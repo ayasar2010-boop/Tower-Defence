@@ -17,7 +17,7 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 - [x] **T07** — `InitWaypoints()`: Piksel waypoint dizisi
 - [x] **T08** — `DrawMap()`: Hücre tipine göre renkli grid çizimi
 - [x] **T09** — Grid çizgisi toggle (`showGrid`)
-- [x] **T10** — `GridToWorld()` / `WorldToGrid()` dönüşüm fonksiyonları
+- [x] **T10** — `GridToWorld()` / `WorldToGrid()` dönüşüm fonksiyonlarıi h
 
 ## AŞAMA 3 — Düşman Sistemi
 - [x] **T11** — `SpawnEnemy()`: Tip tablosuna göre HP/hız/renk/yarıçap ata
@@ -126,7 +126,7 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 
 ## AŞAMA 14 — GAMEPLAY DERİNLİĞİ (guidance.md §9, §7, §4)
 
-- [ ] **T59** — **Kule Sinerji Sistemi:** Kule yerleştirilirken 120px içindeki diğer kuleleri tara. Tip çiftlerine göre bonus uygula (BASIC+BASIC → +15% atış hızı vb.). Sinerji çiftleri arası soluk mavi çizgi çiz.
+- [x] **T59** — **Kule Sinerji Sistemi:** Kule yerleştirilirken 120px içindeki diğer kuleleri tara. Tip çiftlerine göre bonus uygula (BASIC+BASIC → +15% atış hızı vb.). Sinerji çiftleri arası soluk mavi çizgi çiz.
 - [ ] **T60** — **Harita Etkileşimleri:** `Interactable` struct + `InteractableType` enum. Hazine sandığı, sunak, iyileştirme kuyusu. Hero yaklaştığında tooltip, E ile etkileşim. Haritaya sabit konumlarda yerleştir.
 - [ ] **T61** — **Gelişmiş Envanter UI:** Mevcut `Inventory`'yi 12 slot grid'e yükselt. `Item` struct (tip, adet, hotkey). `I` tuşu ile panel aç/kapat. Shift+1-6 hızlı kullanım. Slot tooltip.
 
@@ -145,4 +145,3 @@ Her görev tamamlandığında `[x]` ile işaretlenir.
 | 14 — Gameplay Derinliği      | 3      | 0          |
 | 15 — Genişletilmiş İçerik    | 3      | 2          |
 | **Toplam (yeni)**            | **13** | **8**      |
-
