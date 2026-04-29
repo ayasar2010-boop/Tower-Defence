@@ -1,0 +1,70 @@
+# strings_en.txt — English UI strings (T59)
+
+# Main Menu
+MENU_TITLE=Tower Defense RPG
+BTN_START=START GAME
+BTN_SETTINGS=SETTINGS [S]
+BTN_QUIT=QUIT
+MENU_HINT=[SPACE / Click] to continue
+
+# Pause
+PAUSE_TITLE=PAUSED
+BTN_RESUME=RESUME
+BTN_RESTART=Restart [R]
+BTN_BACK_MAP=Back to Map
+
+# General toggle
+TOGGLE_ON=ON
+TOGGLE_OFF=OFF
+
+# Settings
+SETTINGS_TITLE=SETTINGS
+SET_FULLSCREEN=Fullscreen
+SET_MASTER_VOL=Master Volume
+SET_SFX_VOL=SFX Volume
+SET_MUSIC_VOL=Music Volume
+SET_KEYBINDS=Key Bindings
+BTN_SAVE=SAVE
+BTN_BACK=BACK
+SETTINGS_HINT=Left/Right: change value   |   Enter/Space: toggle   |   ESC: back
+
+# Key bindings
+KEYBINDS_TITLE=KEY BINDINGS
+KEYBINDS_LISTEN=Press a key...
+KEYBINDS_HINT=Enter: rebind   |   Del: reset to default   |   ESC: back
+BTN_BACK_ESC=BACK (ESC)
+
+# End screens
+GAMEOVER_TITLE=DEFEATED
+VICTORY_TITLE=VICTORY!
+GAMEOVER_STATS=Score: %d   Enemies: %d
+BTN_PLAY_AGAIN=Play Again [R]
+
+# HUD
+HUD_GOLD=Gold
+HUD_LIVES=Lives
+HUD_WAVE=Wave
+HUD_SCORE=Score
+HUD_PREP=PREP PHASE
+HUD_PLACE=Placing: %d
+HUD_SPEED_2X=SPEED: 2x
+HUD_SPEED_1X=SPEED: 1x
+
+# Wave info
+WAVE_CLEAR=Wave Cleared!
+WAVE_HINT_D=[ D ] - Enter Dungeon Mode
+WAVE_HINT_SPACE=[ SPACE ] - Prep Phase / Next Wave
+WAVE_HINT_NEXT=[ SPACE ] - Start Next Wave
+
+# Tower selection
+TOWER_BASIC=Basic Tower
+TOWER_SNIPER=Sniper
+TOWER_SPLASH=Splash
+BTN_SELECT=[ Select ]
+
+# Building
+BLDG_HINT=[4/5/6]: Select Building  |  Left Click: Place  |  Right Click: Wall  |  [D]: Dungeon
+
+# Tower upgrade / sell
+CTX_UPGRADE=Upgrade
+CTX_SELL=Sell

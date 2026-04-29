@@ -15,9 +15,13 @@ void DrawMinimap(Game *g);
 void DrawContextMenu(Game *g);
 void DrawPathArrows(Game *g);
 void DrawFriendlyUnits(Game *g);
+void DrawOutposts(Game *g);
 void InitFriendlyUnit(FriendlyUnit *fu, FUnitType type, Vector2 pos);
 void SpawnHeroUnit(Game *g);
 void UpdateFriendlyUnits(Game *g, float dt);
+void UpdateBuildings(Game *g, float dt);  /* T85 — auto-train */
 bool IsButtonClicked(Rectangle btn);
 void DrawButton(Rectangle btn, const char *label, Color bg, Color fg);
+void GenerateLootChest(Game *g); /* T89 */
+void DrawForgeUI(Game *g);       /* T93 */
 #endif

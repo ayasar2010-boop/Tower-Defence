@@ -63,7 +63,27 @@ typedef struct {
     ItemType type;
     int amount;
     char name[32];
+    int rarity; /* T92 — ItemRarity enum: 0=Common … 4=Mythical */
 } Item;
+
+/* T91 — Paperdoll ekipman slotları */
+typedef enum {
+    EQUIP_WEAPON = 0, EQUIP_ARMOR = 1, EQUIP_HEAD = 2, EQUIP_ACCESS = 3,
+    EQUIP_SLOT_COUNT
+} EquipSlot;
+
+typedef struct {
+    char  name[32];
+    int   rarity;
+    float bonusDmg;
+    float bonusDef;
+    float bonusHp;
+    float bonusSpeed;
+    bool  occupied;
+    /* T94 — Yükseltme seviyesi ve glow efekti */
+    int   upgradeLevel;  /* +0 başlangıç, +3'e kadar garantili */
+    float upgradeGlow;   /* başarılı upgrade sonrası glow timer */
+} EquippedItem;
 
 #define MAX_INVENTORY_SLOTS 12
 
@@ -136,6 +156,9 @@ typedef struct {
     Color accentColor;
 
     bool  alive;
+
+    /* T91 — Paperdoll ekipman slotları */
+    EquippedItem equip[EQUIP_SLOT_COUNT];
 } Hero;
 
 /* Önceki şehirlerden çağrılan müttefik birlik */
@@ -211,5 +234,6 @@ void  UpdateDungeon(DungeonMode *dungeon, Hero *hero, float dt);
 void  DrawDungeon(DungeonMode *dungeon, Hero *hero);
 void  UpdateHero(Hero *hero, DungeonMode *dungeon, float dt);
 void  SpawnAllies(DungeonMode *dungeon, Vector2 heroPos);
+void  ApplyEquipStats(Hero *hero, EquipSlot slot, bool equipping);
 
 #endif

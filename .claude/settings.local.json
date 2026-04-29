@@ -63,7 +63,21 @@
       "Bash(grep -v \"^\\\\s*//\")",
       "Bash(C:/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -pipe -IC:/msys64/mingw64/include src/dungeon.c src/homecity.c src/logger.c src/main.c src/save.c src/settings.c src/siege.c src/ui.c src/util.c -LC:/msys64/mingw64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game.exe)",
       "Bash(awk -F: '$2~/^[0-9]+$/{print}')",
-      "Bash(awk 'NR>=1987 && NR<=2100 && /^void /' \"c:/Users/ali.erdogan/Documents/TD_Test/src/main.c\")"
+      "Bash(awk 'NR>=1987 && NR<=2100 && /^void /' \"c:/Users/ali.erdogan/Documents/TD_Test/src/main.c\")",
+      "Bash(TEMP='C:/Users/ali.erdogan/AppData/Local/Temp' TMP='C:/Users/ali.erdogan/AppData/Local/Temp' /c/msys64/usr/bin/make.exe OS=Windows_NT)",
+      "Bash(TEMP='C:/Users/ali.erdogan/AppData/Local/Temp' TMP='C:/Users/ali.erdogan/AppData/Local/Temp' /c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -pipe -IC:/msys64/mingw64/include src/audio.c src/dungeon.c src/enemy.c src/homecity.c src/hud.c src/input.c src/logger.c src/main.c src/map.c src/particle.c src/projectile.c src/save.c src/settings.c src/siege.c src/tower.c src/ui.c src/util.c src/wave.c -LC:/msys64/mingw64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game.exe)",
+      "Bash(TEMP='C:/Users/ali.erdogan/AppData/Local/Temp' TMP='C:/Users/ali.erdogan/AppData/Local/Temp' /c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -pipe -IC:/msys64/mingw64/include src/hud.c -c -o /tmp/hud.o)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include -Isrc src/hud.c -c -o /tmp/hud.o)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include -Isrc src/hud.c -c -o release/hud.o)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe --version)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include -Isrc -fsyntax-only src/hud.c)",
+      "Bash(TEMP='C:\\\\Users\\\\ali.erdogan\\\\AppData\\\\Local\\\\Temp' TMP='C:\\\\Users\\\\ali.erdogan\\\\AppData\\\\Local\\\\Temp' C:/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include src/audio.c src/dungeon.c src/enemy.c src/homecity.c src/hud.c src/input.c src/logger.c src/main.c src/map.c src/particle.c src/projectile.c src/save.c src/settings.c src/siege.c src/tower.c src/ui.c src/util.c src/wave.c -LC:/msys64/mingw64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game.exe)",
+      "Bash(TEMP='C:/Users/ali.erdogan/AppData/Local/Temp' TMP='C:/Users/ali.erdogan/AppData/Local/Temp' /c/msys64/usr/bin/make.exe OS=Windows_NT -B)",
+      "Bash(C:/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include src/audio.c src/dungeon.c src/enemy.c src/homecity.c src/hud.c src/input.c src/logger.c src/main.c src/map.c src/particle.c src/projectile.c src/save.c src/settings.c src/siege.c src/tower.c src/ui.c src/util.c src/wave.c -LC:/msys64/mingw64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game.exe)",
+      "Bash(C:/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -O2 -IC:/msys64/mingw64/include src/audio.c src/dungeon.c src/enemy.c src/homecity.c src/hud.c src/input.c src/logger.c src/main.c src/map.c src/particle.c src/projectile.c src/save.c src/settings.c src/siege.c src/tower.c src/ui.c src/util.c src/wave.c -LC:/msys64/mingw64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game2.exe)",
+      "Bash(grep -v '^$')",
+      "PowerShell(cd C:\\\\Users\\\\ali.erdogan\\\\Documents\\\\TD_Test; $p = Start-Process -FilePath \"C:\\\\msys64\\\\mingw64\\\\bin\\\\gcc.exe\" -ArgumentList \"-std=c99 -Wall -O2 -pipe -IC:\\\\msys64\\\\mingw64\\\\include src/audio.c src/dungeon.c src/enemy.c src/guardian.c src/homecity.c src/hud.c src/i18n.c src/input.c src/logger.c src/main.c src/manager.c src/map.c src/particle.c src/projectile.c src/rarity.c src/save.c src/settings.c src/siege.c src/tower.c src/ui.c src/util.c src/wave.c -LC:\\\\msys64\\\\mingw64\\\\lib -lraylib -lopengl32 -lgdi32 -lwinmm -o release/game.exe\" -Wait -NoNewWindow -RedirectStandardError \"C:\\\\Users\\\\ali.erdogan\\\\Documents\\\\TD_Test\\\\build_errors.txt\" -RedirectStandardOutput \"C:\\\\Users\\\\ali.erdogan\\\\Documents\\\\TD_Test\\\\build_out.txt\" -PassThru; Write-Output \"ExitCode: $\\($p.ExitCode\\)\")",
+      "PowerShell(& C:\\\\msys64\\\\usr\\\\bin\\\\bash.exe \"C:/Users/ali.erdogan/Documents/TD_Test/build_tmp/compile_hud.sh\")"
     ]
   }
 }

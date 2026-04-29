@@ -7,6 +7,7 @@
 
 #include "dungeon.h"
 #include "homecity.h"
+#include "i18n.h"
 #include "save.h"
 #include "settings.h"
 #include "siege.h"
@@ -60,11 +61,25 @@
 #define FUNIT_BLOCK_DIST     28.0f
 
 #define MAX_BUILDINGS        10
+#define MAX_OUTPOSTS          5
 #define PREP_PHASE_DURATION  25.0f
+#define MAX_GUARDIANS         8
+#define GUARDIAN_AGGRO_RANGE 80.0f
 
 /* ============================================================
  * ENUM'LAR
  * ============================================================ */
+
+/* T92 — Nadirlik sistemi (5 kademe) */
+typedef enum {
+    RARITY_COMMON    = 0,
+    RARITY_UNCOMMON  = 1,
+    RARITY_RARE      = 2,
+    RARITY_EPIC      = 3,
+    RARITY_MYTHICAL  = 4,
+    RARITY_COUNT
+} ItemRarity;
+
 typedef enum {
     CELL_EMPTY = 0, CELL_PATH = 1, CELL_BUILDABLE = 2,
     CELL_TOWER = 3, CELL_RURAL = 4, CELL_VILLAGE = 5
@@ -73,7 +88,12 @@ typedef enum {
 typedef enum {
     TERRAIN_NONE = 0, TERRAIN_MOUNTAIN = 1, TERRAIN_ROCK = 2,
     TERRAIN_RIVER = 3, TERRAIN_FIELD = 4, TERRAIN_TREE = 5,
-    TERRAIN_BUSH = 6, TERRAIN_COUNT
+    TERRAIN_BUSH = 6,
+    /* T87 — Gameplay terrain */
+    TERRAIN_MUD = 7,        /* -%30 hız */
+    TERRAIN_TALL_GRASS = 8, /* Gizlenme: fog dışında görünmez */
+    TERRAIN_STONY = 9,      /* +%20 hasar azaltma */
+    TERRAIN_COUNT
 } TerrainType;
 
 typedef enum { TOWER_BASIC, TOWER_SNIPER, TOWER_SPLASH, TOWER_TYPE_COUNT } TowerType;
@@ -106,33 +126,57 @@ typedef enum {
 
 typedef enum {
     FUNIT_ARCHER = 0, FUNIT_WARRIOR = 1, FUNIT_MAGE = 2,
-    FUNIT_KNIGHT = 3, FUNIT_HERO = 4, FUNIT_TYPE_COUNT
+    FUNIT_KNIGHT = 3, FUNIT_HERO = 4, FUNIT_VILLAGER = 5, FUNIT_TYPE_COUNT
 } FUnitType;
 
-typedef enum { FUNIT_HOLD, FUNIT_ATTACK, FUNIT_MOVE } FUnitOrder;
+typedef enum { FUNIT_HOLD, FUNIT_ATTACK, FUNIT_MOVE, FUNIT_PATROL } FUnitOrder;
+
+/* T83 — Köylü FSM durumları */
+typedef enum {
+    VSTATE_IDLE = 0, VSTATE_MOVE_TO_NODE, VSTATE_BUILD_CAMP,
+    VSTATE_GATHERING, VSTATE_TRANSPORT
+} VillagerState;
 
 typedef enum {
     BUILDING_BARRACKS, BUILDING_MARKET, BUILDING_BARRICADE,
-    BUILDING_TOWN_CENTER, BUILDING_TYPE_COUNT
+    BUILDING_TOWN_CENTER, BUILDING_BLACKSMITH, BUILDING_TYPE_COUNT
 } BuildingType;
 
 /* ============================================================
  * STRUCT'LAR
  * ============================================================ */
 typedef struct {
-    Vector2   position;
-    FUnitType type;
-    FUnitOrder order;
-    Vector2   moveTarget;
-    float     hp, maxHp;
-    float     atk;
-    float     attackRange;
-    float     attackCooldown;
-    float     attackSpeed;
-    int       engagedEnemyIdx;
-    bool      active;
-    bool      selected;
+    Vector2      position;
+    FUnitType    type;
+    FUnitOrder   order;
+    Vector2      moveTarget;
+    float        hp, maxHp;
+    float        atk;
+    float        attackRange;
+    float        attackCooldown;
+    float        attackSpeed;
+    int          engagedEnemyIdx;
+    bool         active;
+    bool         selected;
+    /* T85 — patrol için ikinci hedef nokta */
+    Vector2      patrolTarget;
+    bool         patrolReturn;
+    /* T83 — köylü FSM alanları */
+    VillagerState vstate;
+    float         gatherTimer;
+    float         resourceCarried;
+    int           outpostIdx;
+    Vector2       nodePos;
 } FriendlyUnit;
+
+/* T83 — Outpost (dışarıdaki kamp yapısı) */
+typedef struct {
+    Vector2 position;
+    int     level;        /* 0=yok, 1=kamp */
+    float   resources;    /* birikmiş kaynak */
+    float   buildTimer;
+    bool    active;
+} Outpost;
 
 typedef struct {
     Vector2   position;
@@ -155,6 +199,9 @@ typedef struct {
     bool      isCasting;
     float     castTimer;
     Vector2   targetAbilityPos;
+    /* T87 — Terrain efektleri */
+    bool      inTallGrass;
+    float     terrainArmor; /* 0.0-1.0: hasar azaltma oranı */
 } Enemy;
 
 typedef struct {
@@ -288,7 +335,27 @@ typedef struct {
     int          gridX, gridY;
     BuildingType type;
     bool         active;
+    /* T85 — Auto-Train & Patrol */
+    bool         autoTrain;
+    float        trainCooldown;   /* kalan süre */
+    Vector2      rallyPoint;
 } Building;
+
+/* T88 — Kaynak Muhafızı */
+typedef struct {
+    Vector2 position;
+    Vector2 patrolCenter;
+    float   patrolAngle;
+    float   hp, maxHp;
+    float   radius;
+    int     level;          /* 1=Zayıf, 2=Orta, 3=Güçlü */
+    float   attackDamage;
+    float   attackCooldown;
+    float   attackRange;
+    int     lootGold;
+    bool    aggro;
+    bool    active;
+} ResourceGuardian;
 
 typedef struct {
     float       progress;
@@ -297,6 +364,33 @@ typedef struct {
     GameState   nextState;
     const char *tipText;
 } LoadingScreen;
+
+/* T89 — Loot Chest */
+#define MAX_CHEST_ITEMS 6
+
+typedef struct {
+    float openTimer;     /* 0.0 → 1.0, animasyon süresi */
+    bool  animDone;
+    bool  visible;
+    char  itemNames[MAX_CHEST_ITEMS][32];
+    int   itemRarity[MAX_CHEST_ITEMS]; /* 0=Common,1=Uncommon,2=Rare,3=Epic */
+    int   itemGold;      /* toplam altın ödülü */
+    int   itemCount;
+} LootChest;
+
+/* T86 — Manager tick-rate sabitleri */
+#define MGR_ECO_HZ   4.0f
+#define MGR_AI_HZ    5.0f
+#define MGR_TICK_ECO (1.0f / MGR_ECO_HZ)
+#define MGR_TICK_AI  (1.0f / MGR_AI_HZ)
+
+typedef struct {
+    float ecoTimer;      /* Ekonomi tick birikimcisi */
+    float aiTimer;       /* AI karar tick birikimcisi */
+    int   marketIncome;  /* Son eko-tick market geliri */
+    int   activeUnits;   /* Son AI-tick aktif birim sayısı */
+    int   engagedUnits;  /* Son AI-tick çarpışan birim sayısı */
+} Managers;
 
 /* ============================================================
  * GAME — Ana oyun durumu (tüm alt sistemleri içerir)
@@ -350,6 +444,9 @@ typedef struct {
     FriendlyUnit  friendlyUnits[MAX_FRIENDLY_UNITS];
     int           pendingPlacementCount;
     FUnitType     pendingPlacementType;
+    /* T83 — Outpost (kamp) dizisi */
+    Outpost       outposts[MAX_OUTPOSTS];
+    int           outpostCount;
 
     ScreenShake   screenShake;
     FloatingText  floatingTexts[MAX_FLOATING_TEXTS];
@@ -375,6 +472,22 @@ typedef struct {
 
     Settings  settings;
     GameState preSettingsState;
+
+    Managers  managers; /* T86 — tick-rate manager */
+
+    /* T88 — Kaynak Muhafızları */
+    ResourceGuardian guardians[MAX_GUARDIANS];
+    int              guardianCount;
+
+    /* T89 — Loot Chest */
+    LootChest lootChest;
+
+    /* T93 — Blacksmith Forge UI durumu */
+    bool forgeOpen;
+
+    /* T94 — Yükseltme malzemeleri */
+    int ironOre;
+    int magicDust;
 } Game;
 
 /* ============================================================

@@ -6,7 +6,10 @@
 #include "audio.h"
 #include "enemy.h"
 #include "hud.h"
+#include "i18n.h"
 #include "logger.h"
+#include "guardian.h"
+#include "manager.h"
 #include "map.h"
 #include "particle.h"
 #include "projectile.h"
@@ -250,6 +253,38 @@ void InitLevels(Game *g) {
 }
 
 /* ============================================================
+ * T95 — Grand Forge: boss core → Mythical envanter eşyası
+ * ============================================================ */
+static void HandleGrandForge(Game *g) {
+    if (!g->homeCity.pendingGrandForge) return;
+    g->homeCity.pendingGrandForge = false;
+
+    static const char *MYTHICAL_POOL[] = {
+        "Ejder Kilici", "Zamanin Zirhi", "Kader Taci",
+        "Efsane Yuzuk", "Ruh Kilici",   "Tanri Mizi"
+    };
+    int poolSize = 6;
+    const char *itemName = MYTHICAL_POOL[GetRandomValue(0, poolSize - 1)];
+
+    /* Dungeon envanterinde boş slot bul */
+    Inventory *inv = &g->dungeon.inventory;
+    for (int i = 0; i < MAX_INVENTORY_SLOTS; i++) {
+        if (inv->slots[i].type == ITEM_NONE) {
+            inv->slots[i].type   = ITEM_GEAR;
+            inv->slots[i].rarity = RARITY_MYTHICAL;
+            inv->slots[i].amount = 1;
+            strncpy(inv->slots[i].name, itemName, 31);
+            inv->slots[i].name[31] = '\0';
+            break;
+        }
+    }
+
+    /* Ekran bildirimi: wave banner sistemi */
+    snprintf(g->waveNameText, sizeof(g->waveNameText), "Mythical: %s!", itemName);
+    g->waveNameTimer = 4.0f;
+}
+
+/* ============================================================
  * CalcLevelStars — Kalan cana göre yıldız hesapla
  * ============================================================ */
 void InitGame(Game *g) {
@@ -269,7 +304,10 @@ void InitGame(Game *g) {
     InitLevels(g);
     InitHomeCity(&g->homeCity);
     InitSiegeMechanics(&g->siege);
+    InitManagers(&g->managers);
+    InitGuardians(g);
     LoadSettings(&g->settings); /* T57 — settings.ini'den oku, yoksa varsayılan */
+    I18nLoad(g->settings.language);  /* T59 — dil dosyasını yükle */
     g->selectedBuilding = BUILDING_BARRACKS;
     g->selectedBuildingType = -1;
     /* T69 — Kamera: yakin gorunum, yolun ilk kösesine merkezle */
@@ -285,6 +323,9 @@ void InitGame(Game *g) {
         g->friendlyUnits[i].engagedEnemyIdx = -1;
     g->pendingPlacementCount = 0;
     g->pendingPlacementType = FUNIT_ARCHER;
+    /* T94 — Başlangıç malzemeleri */
+    g->ironOre   = 5;
+    g->magicDust = 2;
 }
 
 /* ============================================================
@@ -730,6 +771,42 @@ void UpdateMenu(Game * g) {
                         break;
                     }
 
+                    /* T87 — Çamur: koyu kahve-yeşil bataklık doku */
+                    case TERRAIN_MUD: {
+                        DrawTriangle(top, left, right, (Color){60, 45, 20, 200});
+                        DrawTriangle(right, left, bot, (Color){60, 45, 20, 200});
+                        /* Çamur lekeleri */
+                        DrawCircle((int)(ctr.x - hw * 0.25f), (int)(ctr.y + hh * 0.15f),
+                                   hw * 0.22f, (Color){45, 32, 12, 180});
+                        DrawCircle((int)(ctr.x + hw * 0.3f), (int)(ctr.y - hh * 0.2f),
+                                   hw * 0.17f, (Color){45, 32, 12, 180});
+                        break;
+                    }
+
+                    /* T87 — Uzun ot: salkım yeşil çizgiler */
+                    case TERRAIN_TALL_GRASS: {
+                        for (int blade = 0; blade < 5; blade++) {
+                            float bx = ctr.x + (blade - 2) * hw * 0.32f;
+                            float by = ctr.y - hh * 0.3f;
+                            float sway = sinf((float)GetTime() * 1.8f + blade * 0.9f) * 1.8f;
+                            DrawLineEx((Vector2){bx, by + hh * 0.5f},
+                                       (Vector2){bx + sway, by - hh * 1.2f}, 1.4f,
+                                       (Color){55, 140, 45, 220});
+                        }
+                        break;
+                    }
+
+                    /* T87 — Taşlık zemin: düz açık gri plaka */
+                    case TERRAIN_STONY: {
+                        DrawTriangle(top, left, right, (Color){118, 112, 105, 180});
+                        DrawTriangle(right, left, bot, (Color){118, 112, 105, 180});
+                        /* Çatlak çizgisi */
+                        DrawLineEx((Vector2){ctr.x - hw * 0.4f, ctr.y - hh * 0.1f},
+                                   (Vector2){ctr.x + hw * 0.5f, ctr.y + hh * 0.3f},
+                                   1.0f, (Color){75, 70, 65, 160});
+                        break;
+                    }
+
                     default:
                         break;
                     }
@@ -754,13 +831,29 @@ void UpdateMenu(Game * g) {
         void UpdatePrepPhase(Game * g, float dt) {
             g->prepTimer -= dt;
 
-            /* 4/5/6: bina tipi seç */
+            /* 4/5/6/7: bina tipi seç */
             if (IsKeyPressed(KEY_FOUR))
                 g->selectedBuilding = BUILDING_BARRACKS;
             if (IsKeyPressed(KEY_FIVE))
                 g->selectedBuilding = BUILDING_MARKET;
             if (IsKeyPressed(KEY_SIX))
                 g->selectedBuilding = BUILDING_BARRICADE;
+            if (IsKeyPressed(KEY_SEVEN))
+                g->selectedBuilding = BUILDING_BLACKSMITH;
+
+            /* F tuşu: mevcut Demirci'ye forge UI aç/kapat */
+            if (IsKeyPressed(KEY_F)) {
+                bool hasSmith = false;
+                for (int i = 0; i < g->buildingCount; i++)
+                    if (g->buildings[i].active && g->buildings[i].type == BUILDING_BLACKSMITH)
+                        hasSmith = true;
+                if (hasSmith) g->forgeOpen = !g->forgeOpen;
+            }
+            /* ESC forge kapat */
+            if (IsKeyPressed(KEY_ESCAPE) && g->forgeOpen) {
+                g->forgeOpen = false;
+                return;
+            }
 
             /* A/S: birim sipari modu */
             if (IsKeyPressed(KEY_A))
@@ -798,14 +891,17 @@ void UpdateMenu(Game * g) {
                     bool canPlace = (g->selectedBuilding == BUILDING_BARRICADE)
                                         ? (g->grid[gy][gx] == CELL_PATH)
                                         : (g->grid[gy][gx] == CELL_BUILDABLE);
-                    if (canPlace) {
+                    /* Blacksmith için maliyet kontrolü */
+                    int cost = 0;
+                    if (g->selectedBuilding == BUILDING_MARKET)       cost = 30;
+                    if (g->selectedBuilding == BUILDING_BLACKSMITH)    cost = 80;
+                    if (canPlace && g->gold >= cost) {
                         Building *b = &g->buildings[g->buildingCount++];
                         b->gridX = gx;
                         b->gridY = gy;
                         b->type = g->selectedBuilding;
                         b->active = true;
-                        if (g->selectedBuilding == BUILDING_MARKET && g->gold >= 30)
-                            g->gold -= 30;
+                        g->gold -= cost;
                     }
                 }
             done_prep_click:;
@@ -859,16 +955,24 @@ void UpdateMenu(Game * g) {
                      secs <= 5 ? RED : GOLD);
 
             /* Bina seçim paneli */
-            const char *labels[BUILDING_TYPE_COUNT] = {"[4] Kışla  (+40 Altin/dalga, ücretsiz)",
-                                                       "[5] Pazar  (-maliyet, 30 Altin)",
-                                                       "[6] Barikat  (Düsman yavaşlatır)"};
-            Color sel_colors[BUILDING_TYPE_COUNT] = {GREEN, SKYBLUE, ORANGE};
+            const char *labels[BUILDING_TYPE_COUNT] = {
+                "[4] Kışla  (+40 Altin/dalga, ücretsiz)",
+                "[5] Pazar  (-maliyet, 30 Altin)",
+                "[6] Barikat  (Düsman yavaşlatır)",
+                "[--] Kasaba Merkezi",
+                "[7] Demirci  (Eşya yükseltme, 80 Altin)"
+            };
+            Color sel_colors[BUILDING_TYPE_COUNT] = {GREEN, SKYBLUE, ORANGE, GOLD, (Color){255, 120, 40, 255}};
+            /* BUILDING_TOWN_CENTER kullanıcı seçimi yok, atla */
             for (int i = 0; i < BUILDING_TYPE_COUNT; i++) {
+                if (i == BUILDING_TOWN_CENTER) continue;
                 Color bg = (g->selectedBuilding == (BuildingType)i) ? (Color){60, 80, 60, 200}
                                                                     : (Color){30, 35, 30, 160};
-                DrawRectangle(20, 110 + i * 44, 360, 40, bg);
-                DrawRectangleLines(20, 110 + i * 44, 360, 40, sel_colors[i]);
-                DrawText(labels[i], 30, 121 + i * 44, 14, sel_colors[i]);
+                /* Dizin: TOWN_CENTER atlandı, görsel sıra düzenle */
+                int drawIdx = (i < BUILDING_TOWN_CENTER) ? i : i - 1;
+                DrawRectangle(20, 110 + drawIdx * 44, 360, 40, bg);
+                DrawRectangleLines(20, 110 + drawIdx * 44, 360, 40, sel_colors[i]);
+                DrawText(labels[i], 30, 121 + drawIdx * 44, 14, sel_colors[i]);
             }
 
             /* Yerlestirilen binalar — izometrik pozisyon */
@@ -877,14 +981,16 @@ void UpdateMenu(Game * g) {
                 if (!b->active)
                     continue;
                 Vector2 bp = GridToWorld(b->gridX, b->gridY);
-                Color bc = (b->type == BUILDING_BARRACKS) ? GREEN
-                           : (b->type == BUILDING_MARKET) ? SKYBLUE
-                                                          : ORANGE;
+                Color bc = (b->type == BUILDING_BARRACKS)   ? GREEN
+                           : (b->type == BUILDING_MARKET)   ? SKYBLUE
+                           : (b->type == BUILDING_BLACKSMITH) ? (Color){255, 120, 40, 255}
+                                                              : ORANGE;
                 DrawCircle((int)bp.x, (int)bp.y, (float)ISO_HALF_H * 1.4f, Fade(bc, 0.55f));
                 DrawCircleLines((int)bp.x, (int)bp.y, (float)ISO_HALF_H * 1.4f, bc);
-                const char *sym = (b->type == BUILDING_BARRACKS) ? "K"
-                                  : (b->type == BUILDING_MARKET) ? "P"
-                                                                 : "B";
+                const char *sym = (b->type == BUILDING_BARRACKS)   ? "K"
+                                  : (b->type == BUILDING_MARKET)   ? "P"
+                                  : (b->type == BUILDING_BLACKSMITH) ? "D"
+                                                                     : "B";
                 DrawText(sym, (int)bp.x - 4, (int)bp.y - 6, 10, WHITE);
             }
 
@@ -893,9 +999,12 @@ void UpdateMenu(Game * g) {
 
             /* Alt talimat */
             DrawRectangle(0, SCREEN_HEIGHT - 50, SCREEN_WIDTH, 50, (Color){0, 0, 0, 160});
-            DrawText("[4/5/6]: Bina Sec  |  Sol Tık: Bina Koy  |  Sag Tık: Duvar Koy  |  [D]: "
-                     "Dungeon  |  [SPACE]: Dalga Başlat",
-                     30, SCREEN_HEIGHT - 34, 13, (Color){200, 200, 180, 220});
+            DrawText("[4/5/6/7]: Bina Sec  |  Sol Tık: Bina Koy  |  Sag Tık: Duvar Koy  |  [F]: "
+                     "Forge Ac  |  [D]: Dungeon  |  [SPACE]: Dalga Başlat",
+                     30, SCREEN_HEIGHT - 34, 12, (Color){200, 200, 180, 220});
+
+            /* T93 — Forge UI (Demirci NPC paneli) */
+            if (g->forgeOpen) DrawForgeUI(g);
         }
 
         /* ============================================================
@@ -938,6 +1047,9 @@ void UpdateMenu(Game * g) {
                     HandleInput(&game);
                     UpdateEnemies(&game, dt);
                     UpdateFriendlyUnits(&game, dt);
+                    UpdateBuildings(&game, dt);
+                    UpdateGuardians(&game, dt);
+                    UpdateManagers(&game, dt);
                     UpdateTowers(&game, dt);
                     UpdateProjectiles(&game, dt);
                     UpdateParticles(&game, dt);
@@ -947,6 +1059,7 @@ void UpdateMenu(Game * g) {
                     UpdateFogOfWar(&game); /* T70 */
                     UpdateWaves(&game, dt);
                     UpdateHomeCity(&game.homeCity, dt);
+                    HandleGrandForge(&game);
                     CheckGameConditions(&game);
                     /* HomeCity pendingRequest: birim yerlestirme modunu ac */
                     if (game.homeCity.pendingRequest >= 0) {
@@ -965,6 +1078,7 @@ void UpdateMenu(Game * g) {
                 case STATE_WAVE_CLEAR:
                     UpdateParticles(&game, dt);
                     UpdateHomeCity(&game.homeCity, dt);
+                    HandleGrandForge(&game);
                     /* HomeCity pending birim */
                     if (game.homeCity.pendingRequest >= 0) {
                         game.pendingPlacementType = (FUnitType)(game.homeCity.pendingRequest - 1);
@@ -983,6 +1097,7 @@ void UpdateMenu(Game * g) {
                     if (IsKeyPressed(KEY_SPACE) && game.currentWave < game.totalWaves) {
                         game.state = STATE_PREP_PHASE;
                         game.prepTimer = PREP_PHASE_DURATION;
+                        UpgradeWallsByProsperity(&game.siege, game.homeCity.prosperity);
                         OnWaveStart(&game.homeCity, &game.gold);
                     } else if (IsKeyPressed(KEY_SPACE)) {
                         game.state = STATE_PLAYING;
@@ -995,6 +1110,7 @@ void UpdateMenu(Game * g) {
                     UpdatePrepPhase(&game, dt);
                     UpdateSiegeMechanics(&game.siege, dt);
                     UpdateHomeCity(&game.homeCity, dt);
+                    HandleGrandForge(&game);
                     /* HomeCity pending birim */
                     if (game.homeCity.pendingRequest >= 0) {
                         game.pendingPlacementType = (FUnitType)(game.homeCity.pendingRequest - 1);

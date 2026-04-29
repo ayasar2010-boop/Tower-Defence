@@ -195,6 +195,7 @@ void UpdateWaves(Game *g, float dt) {
                 for (int i = 0; i < lv->completionCount; i++)
                     g->dialogue.lines[i] = lv->completion[i];
                 PlaySFX(&g->audio, SFX_VICTORY); /* T64 */
+                GenerateLootChest(g); /* T89 */
                 g->state = STATE_LEVEL_COMPLETE;
             } else {
                 g->state = STATE_WAVE_CLEAR;

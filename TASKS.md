@@ -24,9 +24,9 @@
 | **MVP-Core** | 16 (TD-RPG Hybrid) | 5 | 5 |
 | **MVP-Plus** | 17 (Gameplay Derinliği) | 3 | 1 |
 | **MVP-Plus** | 18 (Dalga & İçerik) | 3 | 3 |
-| **MVP-Plus** | 19 (Otonom Şehir) | 5 | 0 |
-| **MVP-Plus** | 20 (Loot & Ekipman) | 4 | 0 |
-| **MVP-Plus** | 21 (Demircilik) | 4 | 0 |
+| **MVP-Plus** | 19 (Otonom Şehir) | 5 | 5 |
+| **MVP-Plus** | 20 (Loot & Ekipman) | 4 | 4 |
+| **MVP-Plus** | 21 (Demircilik) | 4 | 1 |
 | **Post-MVP** | 22 (Görevler & Director AI) | 4 | 0 |
 | **Post-MVP** | 23 (Yaşayan Evren) | 4 | 0 |
 | **Post-MVP** | 24 (Derin Hero Mekanikleri) | 5 | 0 |
@@ -34,7 +34,7 @@
 | **Post-MVP** | 26 (Lore Entegrasyonu) | 4 | 0 |
 | **Polish** | 27 (Tutorial / Erişilebilirlik / Perf) | 5 | 0 |
 | **DLC/Future** | 28 (Co-op Multiplayer) | 5 | 0 |
-| **TOTAL** | | **123** | **67** |
+| **TOTAL** | | **123** | **77** |
 
 ---
 
@@ -126,7 +126,7 @@
   - `src/input.c/h` `src/util.c/h` (vec math, RNG)
 - [x] **T53** — **Nesne Havuzu (Object Pooling):** Mermi, partikül, düşman, floating-text için statik diziler + `isActive` bayrağı. `malloc/free` yasak.
 - [x] **T54** — **Tip ortak başlığı (`types.h`):** Tüm `enum` ve struct'ları tek yerden include edilebilir kıl. Forward declaration disiplini.
-- [ ] **T55** — **🎮 PLAYTEST-1:** Refaktör sonrası tüm Aşama 1–9 fonksiyonu regresyonsuz çalışıyor mu? Kabul kriteri: 60 FPS'de 200 düşman + 50 kule + 300 mermi.
+- [x] **T55** — **🎮 PLAYTEST-1:** Refaktör sonrası tüm Aşama 1–9 fonksiyonu regresyonsuz çalışıyor mu? Kabul kriteri: 60 FPS'de 200 düşman + 50 kule + 300 mermi.
 
 ---
 
@@ -135,8 +135,8 @@
 
 - [x] **T56** — **Save/Load Sistemi:** `fwrite`/`fread` ile slot tabanlı kayıt (3 slot). `Game` struct'ı pointer-free; pointer yerine pool indeksleri kullan. Versiyonlama header'ı (magic + version).
 - [x] **T57** — **Ayarlar Menüsü:** Çözünürlük, fullscreen, master/SFX/music ses seviyeleri. `settings.ini` dosyası.
-- [ ] **T58** — **Key Rebinding:** Tüm input'lar `keymap[]` üzerinden okunsun. Ayarlar menüsünden değiştirilebilsin.
-- [ ] **T59** — **Lokalizasyon altyapısı:** `strings_tr.txt` + `strings_en.txt`. Her UI metni `T("KEY")` makrosundan geçsin. Eski hardcoded string yasak.
+- [x] **T58** — **Key Rebinding:** Tüm input'lar `keymap[]` üzerinden okunsun. Ayarlar menüsünden değiştirilebilsin.
+- [x] **T59** — **Lokalizasyon altyapısı:** `strings_tr.txt` + `strings_en.txt`. Her UI metni `T("KEY")` makrosundan geçsin. Eski hardcoded string yasak.
 - [x] **T60** — **Logger:** `LOG_INFO`, `LOG_WARN`, `LOG_ERR` makroları. Dosyaya + stdout'a yaz.
 - [ ] **T61** — **🎮 PLAYTEST-2:** Save→Quit→Load döngüsü, dil değiştirme, key rebind. Hiçbir ayar kaybolmamalı.
 
@@ -190,23 +190,23 @@
 - [x] **T82** — *(eski T64, sese taşındı)* — `T70` ile birleşti
 
 ## AŞAMA 19 — Otonom Şehir ve Ekonomi
-- [ ] **T83** — **Köylü FSM ve Outposts:** IDLE → MOVE_TO_NODE → BUILD_CAMP → GATHERING → TRANSPORT_TO_TOWN. Surdışı kamplar savunmasız.
-- [ ] **T84** — **Kademeli Sur Sistemi:** Prosperity eşikleri T1(odun)→T2(taş)→T3(güçlendirilmiş). `PositionSlot[]` snap, range/dmg bonus.
-- [ ] **T85** — **Auto-Train & Patrol:** Askeri binalara toggle. Üretilen birim `FUNIT_PATROL` → Rally Point.
-- [ ] **T86** — **Manager Mimarisi:** `EconomyManager`, `BuildingManager`, `UnitManager`. Tick-rate optimizasyonu (AI 4-5 Hz). → T52
-- [ ] **T87** — **Global Terrain (Perlin/Simplex):** Çamur (-%30 hız), Uzun Ot (gizlenme), Taşlık (+zırh).
+- [x] **T83** — **Köylü FSM ve Outposts:** IDLE → MOVE_TO_NODE → BUILD_CAMP → GATHERING → TRANSPORT_TO_TOWN. Surdışı kamplar savunmasız.
+- [x] **T84** — **Kademeli Sur Sistemi:** Prosperity eşikleri T1(odun)→T2(taş)→T3(güçlendirilmiş). `PositionSlot[]` snap, range/dmg bonus.
+- [x] **T85** — **Auto-Train & Patrol:** Askeri binalara toggle. Üretilen birim `FUNIT_PATROL` → Rally Point.
+- [x] **T86** — **Manager Mimarisi:** `EconomyManager`, `BuildingManager`, `UnitManager`. Tick-rate optimizasyonu (AI 4-5 Hz). → T52
+- [x] **T87** — **Global Terrain (Perlin/Simplex):** Çamur (-%30 hız), Uzun Ot (gizlenme), Taşlık (+zırh).
 
 ## AŞAMA 20 — Loot & Ekipman Sistemi
-- [ ] **T88** — **Kaynak Muhafızları:** Tarafsız muhafız canavarlar. Kaynak değerine göre seviye. Pending Loot.
-- [ ] **T89** — **End-Level Loot Chest:** Sandık animasyonu + nadirlik renkleriyle liste.
-- [ ] **T90** — **Detaylı Tooltip:** Görsel, isim, nadirlik, statlar, flavor. → T59 (i18n)
-- [ ] **T91** — **Hero Ekipman Slotları + Drag&Drop:** Paperdoll (Weapon/Armor/Head/Accessory). Stat anında yansır.
+- [x] **T88** — **Kaynak Muhafızları:** Tarafsız muhafız canavarlar. Kaynak değerine göre seviye. Pending Loot.
+- [x] **T89** — **End-Level Loot Chest:** Sandık animasyonu + nadirlik renkleriyle liste.
+- [x] **T90** — **Detaylı Tooltip:** Görsel, isim, nadirlik, statlar, flavor. → T59 (i18n)
+- [x] **T91** — **Hero Ekipman Slotları + Drag&Drop:** Paperdoll (Weapon/Armor/Head/Accessory). Stat anında yansır.
 
 ## AŞAMA 21 — Demircilik ve Yükseltme `[RISK: MED]`
-- [ ] **T92** — **Nadirlik (Rarity) Sistemi:** Common/Uncommon/Rare/Epic/Mythical. `flavorText` alanı. → LORE.md
-- [ ] **T93** — **Blacksmith Binası + NPC:** `BUILDING_BLACKSMITH`. Forge UI. NPC karakter ve replikleri için → LORE.md.
-- [ ] **T94** — **Eşya Yükseltme +1/+2/+3:** Demir Cevheri, Büyülü Toz. +3'e %100, +4'ten sonra RNG. Başarısızlıkta -1, kırılma yok. Glow efekti.
-- [ ] **T95** — **Grand Forge (Home City):** Boss core'larından "Mythical" üretim.
+- [x] **T92** — **Nadirlik (Rarity) Sistemi:** Common/Uncommon/Rare/Epic/Mythical. `flavorText` alanı. → LORE.md
+- [x] **T93** — **Blacksmith Binası + NPC:** `BUILDING_BLACKSMITH`. Forge UI. NPC karakter ve replikleri için → LORE.md.
+- [x] **T94** — **Eşya Yükseltme +1/+2/+3:** Demir Cevheri, Büyülü Toz. +3'e %100, +4'ten sonra RNG. Başarısızlıkta -1, kırılma yok. Glow efekti.
+- [x] **T95** — **Grand Forge (Home City):** Boss core'larından "Mythical" üretim.
 
 ---
 

@@ -3,6 +3,7 @@
 #ifndef SETTINGS_H
 #define SETTINGS_H
 
+#include "i18n.h"
 #include <stdbool.h>
 
 #define SETTINGS_FILE "settings.ini"
@@ -24,11 +25,12 @@ typedef enum {
 } KeyAction;
 
 typedef struct {
-    bool  fullscreen;
-    float masterVolume; /* 0.0 – 1.0 */
-    float sfxVolume;
-    float musicVolume;
-    int   keymap[KA_COUNT]; /* T58 — tuş atamaları (Raylib KeyboardKey) */
+    bool     fullscreen;
+    float    masterVolume; /* 0.0 – 1.0 */
+    float    sfxVolume;
+    float    musicVolume;
+    int      keymap[KA_COUNT]; /* T58 — tuş atamaları (Raylib KeyboardKey) */
+    Language language;         /* T59 — LANG_TR veya LANG_EN */
 } Settings;
 
 void        DefaultSettings(Settings *s);

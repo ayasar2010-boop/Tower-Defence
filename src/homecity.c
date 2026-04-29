@@ -44,11 +44,19 @@ void UpdateHomeCity(HomeCity *hc, float dt) {
 
     /* 1-5 tuşlarıyla seçim */
     int sel = -1;
-    if (IsKeyPressed(KEY_ONE))  sel = REINFORCE_GOLD;
-    if (IsKeyPressed(KEY_TWO))  sel = REINFORCE_ARCHER;
+    if (IsKeyPressed(KEY_ONE))   sel = REINFORCE_GOLD;
+    if (IsKeyPressed(KEY_TWO))   sel = REINFORCE_ARCHER;
     if (IsKeyPressed(KEY_THREE)) sel = REINFORCE_WARRIOR;
-    if (IsKeyPressed(KEY_FOUR)) sel = REINFORCE_MAGE;
-    if (IsKeyPressed(KEY_FIVE)) sel = REINFORCE_KNIGHT;
+    if (IsKeyPressed(KEY_FOUR))  sel = REINFORCE_MAGE;
+    if (IsKeyPressed(KEY_FIVE))  sel = REINFORCE_KNIGHT;
+
+    /* T95 — KEY_SIX: Grand Forge (boss core gerekir) */
+    if (IsKeyPressed(KEY_SIX) && hc->bossCores > 0) {
+        hc->bossCores--;
+        hc->pendingGrandForge = true;
+        hc->menuOpen  = false;
+        return;
+    }
 
     if (sel < 0) return;
     if (hc->shipmentPoints < ReinforceCost((ReinforcementType)sel)) return;
@@ -68,14 +76,14 @@ void UpdateHomeCity(HomeCity *hc, float dt) {
 void DrawHomeCityUI(HomeCity *hc, int screenWidth, int screenHeight) {
     /* Üst HUD bilgisi */
     const char *hint = hc->usedThisRound ? "[C] Destek (kullanildi)" : "[C] Destek Cagir";
-    DrawText(TextFormat("Medeniyet Lv:%d  |  Sevk.Puani:%d  |  Refah:%d  |  %s",
-                        hc->civLevel, hc->shipmentPoints, hc->prosperity, hint),
-             screenWidth / 2 - 280, 10, 14, GOLD);
+    DrawText(TextFormat("Medeniyet Lv:%d  |  Sevk.Puani:%d  |  Refah:%d  |  BossCore:%d  |  %s",
+                        hc->civLevel, hc->shipmentPoints, hc->prosperity, hc->bossCores, hint),
+             screenWidth / 2 - 340, 10, 13, GOLD);
 
     if (!hc->menuOpen) return;
 
     /* Panel */
-    int pw = 460, ph = 340;
+    int pw = 460, ph = 400;
     int px = (screenWidth  - pw) / 2;
     int py = (screenHeight - ph) / 2;
     DrawRectangle(px, py, pw, ph, Fade(DARKBLUE, 0.90f));
@@ -107,6 +115,21 @@ void DrawHomeCityUI(HomeCity *hc, int screenWidth, int screenHeight) {
                            afford ? rowColors[i] : DARKGRAY);
         DrawText(labels[i], px + 20, ry + 10, 14,
                  afford ? WHITE : DARKGRAY);
+    }
+
+    /* T95 — Grand Forge satırı */
+    {
+        int gy = py + 100 + REINFORCE_COUNT * 46 + 8;
+        bool hasCores = hc->bossCores > 0;
+        Color gfBg  = hasCores ? (Color){60, 20, 80, 200} : Fade(DARKGRAY, 0.25f);
+        Color gfBrd = hasCores ? (Color){180, 60, 240, 255} : DARKGRAY;
+        DrawRectangle(px + 12, gy, pw - 24, 38, gfBg);
+        DrawRectangleLines(px + 12, gy, pw - 24, 38, gfBrd);
+        char gfLabel[80];
+        snprintf(gfLabel, sizeof(gfLabel),
+                 "[6] Grand Forge  (1 Boss Cekirdegi)  — Mythical esya uret  [mevcut:%d]",
+                 hc->bossCores);
+        DrawText(gfLabel, px + 20, gy + 10, 13, hasCores ? (Color){220, 140, 255, 255} : DARKGRAY);
     }
 }
 

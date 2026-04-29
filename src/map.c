@@ -130,6 +130,21 @@ void InitTerrain(Game *g) {
                      (r >= 52 && r <= 64 && c >= 54 && c <= 82)) {
                 g->terrainLayer[r][c] = ((h % 4) < 3) ? TERRAIN_FIELD : TERRAIN_NONE;
             }
+            /* T87 — Çamur bölgesi: nehir yakını güney şeridi */
+            else if (r >= 28 && r <= 38 && c >= 52 && c <= 76) {
+                if ((h % 5) < 3)
+                    g->terrainLayer[r][c] = TERRAIN_MUD;
+            }
+            /* T87 — Uzun ot: orta ova bandı */
+            else if (r >= 36 && r <= 54 && c >= 28 && c <= 56) {
+                if ((h % 4) < 2)
+                    g->terrainLayer[r][c] = TERRAIN_TALL_GRASS;
+            }
+            /* T87 — Taşlık zemin: kuzey-doğu plato */
+            else if (r >= 8 && r <= 24 && c >= 80 && c <= 110) {
+                if ((h % 3) < 2)
+                    g->terrainLayer[r][c] = TERRAIN_STONY;
+            }
             /* Dağınık taş ve çalı */
             else {
                 int v = h % 18;

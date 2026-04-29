@@ -1,0 +1,70 @@
+# strings_tr.txt — Turkce UI metinleri (T59)
+
+# Ana Menu
+MENU_TITLE=Tower Defense RPG
+BTN_START=OYUNA BASLA
+BTN_SETTINGS=AYARLAR [S]
+BTN_QUIT=CIK
+MENU_HINT=[SPACE / Tik] ileri
+
+# Duraklat
+PAUSE_TITLE=DURAKLATILDI
+BTN_RESUME=DEVAM ET
+BTN_RESTART=Yeniden Baslat [R]
+BTN_BACK_MAP=Haritaya Don
+
+# Genel toggle
+TOGGLE_ON=ACIK
+TOGGLE_OFF=KAPALI
+
+# Ayarlar
+SETTINGS_TITLE=AYARLAR
+SET_FULLSCREEN=Tam Ekran
+SET_MASTER_VOL=Ana Ses
+SET_SFX_VOL=SFX Ses
+SET_MUSIC_VOL=Muzik Ses
+SET_KEYBINDS=Tus Atamalari
+BTN_SAVE=KAYDET
+BTN_BACK=GERI
+SETTINGS_HINT=Sol/Sag: deger degistir   |   Enter/Space: togla   |   ESC: geri
+
+# Tus atamalari
+KEYBINDS_TITLE=TUS ATAMALARI
+KEYBINDS_LISTEN=Bir tusa basin...
+KEYBINDS_HINT=Enter: yeniden ata   |   Del: varsayilana sifirla   |   ESC: geri
+BTN_BACK_ESC=GERI (ESC)
+
+# Oyun sonu
+GAMEOVER_TITLE=YENILGI
+VICTORY_TITLE=ZAFER!
+GAMEOVER_STATS=Skor: %d   Dusmanlar: %d
+BTN_PLAY_AGAIN=Tekrar Oyna [R]
+
+# HUD
+HUD_GOLD=Altin
+HUD_LIVES=Can
+HUD_WAVE=Dalga
+HUD_SCORE=Skor
+HUD_PREP=HAZIRLIK FAZI
+HUD_PLACE=Yerlestirilecek: %d
+HUD_SPEED_2X=HIZ: 2x
+HUD_SPEED_1X=HIZ: 1x
+
+# Dalga bilgisi
+WAVE_CLEAR=Dalga Temizlendi!
+WAVE_HINT_D=[ D ] - Dungeon Moduna Gir
+WAVE_HINT_SPACE=[ SPACE ] - Hazirlik Fazi / Sonraki Dalga
+WAVE_HINT_NEXT=[ SPACE ] - Sonraki Dalgayi Baslat
+
+# Kule secim
+TOWER_BASIC=Temel Kule
+TOWER_SNIPER=Keskin Nisan
+TOWER_SPLASH=Patlayici
+BTN_SELECT=[ Sec ]
+
+# Bina
+BLDG_HINT=[4/5/6]: Bina Sec  |  Sol Tik: Bina Koy  |  Sag Tik: Duvar Koy  |  [D]: Dungeon
+
+# Kule yukselt / sat
+CTX_UPGRADE=Yukselti
+CTX_SELL=Sat

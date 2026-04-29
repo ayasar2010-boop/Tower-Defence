@@ -42,7 +42,21 @@ bool TryPlaceWall(SiegeMechanics *s, int gx, int gy) {
     w->maxHealth = 100;
     w->isGate    = false;
     w->active    = true;
+    w->tier      = 1; /* T84 — T1 odun sur */
     return true;
+}
+
+/* T84 — Prosperity eşiğine göre tüm aktif duvarları yükselt */
+void UpgradeWallsByProsperity(SiegeMechanics *s, int prosperity) {
+    int newTier = (prosperity >= 200) ? 3 : (prosperity >= 100) ? 2 : 1;
+    for (int i = 0; i < s->wallCount; i++) {
+        if (!s->walls[i].active) continue;
+        if (s->walls[i].tier < newTier) {
+            s->walls[i].tier      = newTier;
+            s->walls[i].maxHealth = 100 * newTier;
+            s->walls[i].health    = s->walls[i].maxHealth;
+        }
+    }
 }
 
 /* Yeni bir kıta (battalion) oluşturur; birimleri 3'lü sıra düzenine dizer */
@@ -92,12 +106,17 @@ void DrawSiegeMechanics(SiegeMechanics *s) {
         int px = SIEGE_OFF_X + w->gridX * SIEGE_CELL;
         int py = SIEGE_OFF_Y + w->gridY * SIEGE_CELL;
 
-        DrawRectangle(px, py, SIEGE_CELL, SIEGE_CELL, (Color){75, 65, 55, 210});
-        DrawRectangleLines(px, py, SIEGE_CELL, SIEGE_CELL, (Color){150, 130, 100, 255});
+        /* T84 — tier rengine göre çiz: T1=odun, T2=taş, T3=güçlü */
+        unsigned char fr, fg, fb, br, bg2, bb;
+        if (w->tier >= 3)      { fr=60;  fg=80;  fb=120; br=100; bg2=140; bb=220; }
+        else if (w->tier == 2) { fr=90;  fg=85;  fb=80;  br=160; bg2=150; bb=130; }
+        else                   { fr=75;  fg=55;  fb=35;  br=150; bg2=110; bb=70;  }
+        DrawRectangle(px, py, SIEGE_CELL, SIEGE_CELL, (Color){fr, fg, fb, 215});
+        DrawRectangleLines(px, py, SIEGE_CELL, SIEGE_CELL, (Color){br, bg2, bb, 255});
 
         /* Mazgallar (merlons) */
         for (int m = 0; m < 3; m++)
-            DrawRectangle(px + 4 + m * 15, py + 2, 10, 10, (Color){110, 95, 78, 255});
+            DrawRectangle(px + 4 + m * 15, py + 2, 10, 10, (Color){br, bg2, bb, 255});
 
         /* Can barı */
         float ratio = (float)w->health / (float)w->maxHealth;

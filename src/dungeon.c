@@ -869,7 +869,7 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
     /* T61: Gelişmiş Envanter Arayüzü */
     if (dungeon->inventory.isOpen) {
         int invW = 220;
-        int invH = 290;
+        int invH = 430; /* T91: paperdoll için genişletildi */
         int invX = 1280 - invW - 20;
         int invY = 52 + 20;
 
@@ -917,6 +917,52 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
                     DrawRectangle(sx, sy - 20, tw + 10, 18, (Color){0,0,0,200});
                     DrawText(it->name, sx + 5, sy - 18, 12, WHITE);
                 }
+                /* T91 — ITEM_GEAR tıklandığında ilk boş ekipman slotuna ekle */
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && it->type == ITEM_GEAR) {
+                    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+                        if (!hero->equip[s].occupied) {
+                            strncpy(hero->equip[s].name, it->name, 31);
+                            hero->equip[s].rarity   = it->rarity;
+                            hero->equip[s].occupied = true;
+                            ApplyEquipStats(hero, (EquipSlot)s, true);
+                            it->type = ITEM_NONE; it->amount = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        /* T91 — Paperdoll: 2×2 ekipman slot ızgarası */
+        {
+            static const char *SLOT_NAMES[EQUIP_SLOT_COUNT] = {"SİLAH","ZIRH","KASK","AKSESUAR"};
+            static const Color SLOT_COLORS[EQUIP_SLOT_COUNT] = {
+                {200, 60, 60, 200}, {60, 160, 200, 200},
+                {180, 160, 60, 200}, {120, 80, 200, 200}
+            };
+            int pdY = invY + 300;
+            DrawText("— EKİPMAN —", invX + invW/2 - MeasureText("— EKİPMAN —",11)/2, pdY, 11, GOLD);
+            pdY += 16;
+            for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+                int col2 = s % 2, row2 = s / 2;
+                int ex = invX + 10 + col2 * 105;
+                int ey = pdY + row2 * 54;
+                Color sc = SLOT_COLORS[s];
+                DrawRectangle(ex, ey, 100, 46, (Color){30,30,40,200});
+                DrawRectangleLines(ex, ey, 100, 46, sc);
+                DrawText(SLOT_NAMES[s], ex + 4, ey + 3, 9, sc);
+                if (hero->equip[s].occupied) {
+                    DrawText(hero->equip[s].name, ex + 4, ey + 16, 10, WHITE);
+                    /* Tıkla → çıkar */
+                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+                        CheckCollisionPointRec(GetMousePosition(),
+                                              (Rectangle){(float)ex,(float)ey,100,46})) {
+                        ApplyEquipStats(hero, (EquipSlot)s, false);
+                        hero->equip[s].occupied = false;
+                    }
+                } else {
+                    DrawText("(boş)", ex + 4, ey + 16, 10, DARKGRAY);
+                }
             }
         }
     }
@@ -925,4 +971,48 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
         const char *msg = "Tum odalar temizlendi!  ESC ile geri don.";
         DrawText(msg, 1280/2 - MeasureText(msg, 20)/2, 720/2 - 10, 20, GREEN);
     }
+}
+
+/* T91 — Ekipman ekle/çıkar: hero stat'larını anında günceller */
+void ApplyEquipStats(Hero *hero, EquipSlot slot, bool equipping) {
+    EquippedItem *eq = &hero->equip[slot];
+    float sign = equipping ? 1.0f : -1.0f;
+
+    /* Rarity'ye göre bonus hesapla */
+    float r = (float)(eq->rarity + 1);
+    switch (slot) {
+    case EQUIP_WEAPON:
+        eq->bonusDmg   = r * 6.0f;
+        eq->bonusDef   = 0.0f;
+        eq->bonusHp    = 0.0f;
+        eq->bonusSpeed = 0.0f;
+        break;
+    case EQUIP_ARMOR:
+        eq->bonusDmg   = 0.0f;
+        eq->bonusDef   = r * 4.0f;
+        eq->bonusHp    = r * 12.0f;
+        eq->bonusSpeed = 0.0f;
+        break;
+    case EQUIP_HEAD:
+        eq->bonusDmg   = r * 2.0f;
+        eq->bonusDef   = r * 2.0f;
+        eq->bonusHp    = r * 8.0f;
+        eq->bonusSpeed = 0.0f;
+        break;
+    case EQUIP_ACCESS:
+        eq->bonusDmg   = r * 2.0f;
+        eq->bonusDef   = 0.0f;
+        eq->bonusHp    = 0.0f;
+        eq->bonusSpeed = r * 4.0f;
+        break;
+    default: break;
+    }
+
+    hero->stats.atk   += sign * eq->bonusDmg;
+    hero->stats.def   += sign * eq->bonusDef;
+    hero->stats.maxHp += sign * eq->bonusHp;
+    hero->stats.speed += sign * eq->bonusSpeed;
+    /* HP'yi maxHp ile sınırla */
+    if (hero->stats.hp > hero->stats.maxHp)
+        hero->stats.hp = hero->stats.maxHp;
 }

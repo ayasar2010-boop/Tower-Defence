@@ -1,5 +1,8 @@
 ﻿#include "hud.h"
 #include "enemy.h"
+#include "guardian.h"
+#include "i18n.h"
+#include "rarity.h"
 #include "logger.h"
 #include "map.h"
 #include "particle.h"
@@ -214,18 +217,21 @@ void InitFriendlyUnit(FriendlyUnit *fu, FUnitType type, Vector2 pos) {
         fu->attackRange = 44;
         fu->attackSpeed = 1.0f;
         break;
+    case FUNIT_VILLAGER:
+        fu->maxHp = 50;
+        fu->hp = 50;
+        fu->atk = 0;
+        fu->attackRange = 0;
+        fu->attackSpeed = 0;
+        fu->vstate = VSTATE_IDLE;
+        fu->outpostIdx = -1;
+        break;
     case FUNIT_HERO:
     default:
         fu->maxHp = 250;
         fu->hp = 250;
         fu->atk = 30;
         fu->attackRange = 55;
-        fu->attackSpeed = 1.2f;
-        break;
-        fu->maxHp = 250;
-        fu->hp = 250;
-        fu->atk = 30;
-        fu->attackRange = 65;
         fu->attackSpeed = 1.2f;
         break;
     }
@@ -265,13 +271,20 @@ void SpawnHeroUnit(Game *g) {
     }
 }
 
+static void UpdateVillagers(Game *g, float dt); /* ileri bildirim */
+
 /* Dost birimleri guncelle: hold/attack AI + engaged takibi */
 
 void UpdateFriendlyUnits(Game *g, float dt) {
+    /* T83 — köylüler ayrı FSM'den güncellenir */
+    UpdateVillagers(g, dt);
+
     for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
         FriendlyUnit *fu = &g->friendlyUnits[i];
         if (!fu->active)
             continue;
+        /* Köylüler kendi FSM'inden işlendi */
+        if (fu->type == FUNIT_VILLAGER) continue;
 
         /* Oldu mu? */
         if (fu->hp <= 0.0f) {
@@ -312,6 +325,19 @@ void UpdateFriendlyUnits(Game *g, float dt) {
                 float spd = 100.0f;
                 fu->position.x += dir.x * spd * dt;
                 fu->position.y += dir.y * spd * dt;
+            }
+        }
+
+        /* T85 — PATROL modu: moveTarget ↔ patrolTarget arasında gidip gel */
+        if (fu->order == FUNIT_PATROL) {
+            Vector2 dest = fu->patrolReturn ? fu->moveTarget : fu->patrolTarget;
+            float dist = Vec2Distance(fu->position, dest);
+            if (dist < 8.0f) {
+                fu->patrolReturn = !fu->patrolReturn;
+            } else {
+                Vector2 dir = Vec2Normalize(Vec2Subtract(dest, fu->position));
+                fu->position.x += dir.x * 80.0f * dt;
+                fu->position.y += dir.y * 80.0f * dt;
             }
         }
 
@@ -357,6 +383,135 @@ void UpdateFriendlyUnits(Game *g, float dt) {
     }
 }
 
+/* T83 — Köylü FSM güncelle */
+static void UpdateVillagers(Game *g, float dt) {
+    for (int i = 0; i < MAX_FRIENDLY_UNITS; i++) {
+        FriendlyUnit *v = &g->friendlyUnits[i];
+        if (!v->active || v->type != FUNIT_VILLAGER) continue;
+        if (v->hp <= 0.0f) { v->active = false; continue; }
+
+        switch (v->vstate) {
+        case VSTATE_IDLE: {
+            /* Boş outpost slot ara; yoksa en yakın RURAL hücreye git */
+            int slot = -1;
+            for (int k = 0; k < MAX_OUTPOSTS; k++) {
+                if (!g->outposts[k].active) { slot = k; break; }
+            }
+            if (slot < 0) break; /* tüm slotlar dolu */
+            /* Rastgele bir CELL_RURAL hedef seç */
+            for (int r = 0; r < GRID_ROWS; r++) {
+                for (int c = 0; c < GRID_COLS; c++) {
+                    if (g->grid[r][c] == CELL_RURAL) {
+                        v->nodePos = GridToWorld(c, r);
+                        v->outpostIdx = slot;
+                        v->vstate = VSTATE_MOVE_TO_NODE;
+                        goto next_villager;
+                    }
+                }
+            }
+            break;
+        }
+        case VSTATE_MOVE_TO_NODE: {
+            float d = Vec2Distance(v->position, v->nodePos);
+            if (d < 8.0f) {
+                v->vstate = VSTATE_BUILD_CAMP;
+                v->gatherTimer = 3.0f; /* inşa süresi */
+            } else {
+                Vector2 dir = Vec2Normalize(Vec2Subtract(v->nodePos, v->position));
+                v->position.x += dir.x * 70.0f * dt;
+                v->position.y += dir.y * 70.0f * dt;
+            }
+            break;
+        }
+        case VSTATE_BUILD_CAMP: {
+            v->gatherTimer -= dt;
+            if (v->gatherTimer <= 0.0f && v->outpostIdx >= 0) {
+                Outpost *op = &g->outposts[v->outpostIdx];
+                op->position = v->nodePos;
+                op->level    = 1;
+                op->resources = 0.0f;
+                op->active   = true;
+                if (v->outpostIdx >= g->outpostCount)
+                    g->outpostCount = v->outpostIdx + 1;
+                v->vstate = VSTATE_GATHERING;
+                v->gatherTimer = 0.0f;
+            }
+            break;
+        }
+        case VSTATE_GATHERING: {
+            v->gatherTimer += dt;
+            if (v->outpostIdx >= 0)
+                g->outposts[v->outpostIdx].resources += 8.0f * dt;
+            if (v->gatherTimer >= 6.0f) { /* 6 saniye topla */
+                v->resourceCarried = 50.0f;
+                /* Köye dön: ilk waypoint'e git */
+                if (g->waypointCount > 0)
+                    v->moveTarget = g->waypoints[0];
+                v->vstate = VSTATE_TRANSPORT;
+            }
+            break;
+        }
+        case VSTATE_TRANSPORT: {
+            float d = Vec2Distance(v->position, v->moveTarget);
+            if (d < 12.0f) {
+                /* Köye teslim et */
+                g->gold += (int)(v->resourceCarried);
+                v->resourceCarried = 0.0f;
+                v->vstate = VSTATE_IDLE;
+                v->gatherTimer = 0.0f;
+            } else {
+                Vector2 dir = Vec2Normalize(Vec2Subtract(v->moveTarget, v->position));
+                v->position.x += dir.x * 80.0f * dt;
+                v->position.y += dir.y * 80.0f * dt;
+            }
+            break;
+        }
+        }
+        next_villager:;
+    }
+}
+
+/* T85 — Bina güncelle: Auto-Train (Kışlak) */
+void UpdateBuildings(Game *g, float dt) {
+    for (int i = 0; i < g->buildingCount; i++) {
+        Building *b = &g->buildings[i];
+        if (!b->active || b->type != BUILDING_BARRACKS || !b->autoTrain) continue;
+        b->trainCooldown -= dt;
+        if (b->trainCooldown <= 0.0f) {
+            int cost = 50;
+            if (g->gold < cost) continue;
+            /* Boş friendly unit slotu ara */
+            for (int j = 0; j < MAX_FRIENDLY_UNITS; j++) {
+                if (g->friendlyUnits[j].active) continue;
+                g->gold -= cost;
+                Vector2 bpos = GridToWorld(b->gridX, b->gridY);
+                InitFriendlyUnit(&g->friendlyUnits[j], FUNIT_WARRIOR, bpos);
+                g->friendlyUnits[j].order = FUNIT_PATROL;
+                g->friendlyUnits[j].patrolTarget = b->rallyPoint;
+                g->friendlyUnits[j].patrolReturn  = false;
+                b->trainCooldown = 15.0f;
+                break;
+            }
+        }
+    }
+}
+
+/* T83 — Outpost'ları çiz */
+void DrawOutposts(Game *g) {
+    for (int i = 0; i < g->outpostCount; i++) {
+        Outpost *op = &g->outposts[i];
+        if (!op->active) continue;
+        Color c = (op->level >= 1) ? (Color){180, 130, 60, 220} : (Color){120, 100, 60, 160};
+        DrawRectangle((int)op->position.x - 10, (int)op->position.y - 10, 20, 20, c);
+        DrawRectangleLinesEx((Rectangle){op->position.x - 10, op->position.y - 10, 20, 20},
+                             1.5f, (Color){220, 180, 80, 255});
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%.0f", op->resources);
+        DrawText(buf, (int)op->position.x - 8, (int)op->position.y - 20, 10,
+                 (Color){255, 240, 140, 220});
+    }
+}
+
 /* Dost birimleri ciz: renk + HP bar + durum ikonu */
 
 void DrawFriendlyUnits(Game *g) {
@@ -366,8 +521,9 @@ void DrawFriendlyUnits(Game *g) {
         (Color){200, 80, 255, 230}, /* MAGE    — mor */
         (Color){240, 160, 30, 230}, /* KNIGHT  — turuncu */
         (Color){255, 255, 80, 230}, /* HERO    — sari */
+        (Color){210, 170, 90, 230}, /* VILLAGER — bej */
     };
-    const char *labels[FUNIT_TYPE_COUNT] = {"Ok", "Sv", "By", "Sv", "Hr"};
+    const char *labels[FUNIT_TYPE_COUNT] = {"Ok", "Sv", "By", "Sv", "Hr", "Ky"};
 
     /* Bekleyen yerlestirme gostergesi */
     if (g->pendingPlacementCount > 0) {
@@ -625,6 +781,12 @@ void UpdateLevelComplete(Game *g, float dt) {
             DrawResourceText((Vector2){10, 8}, g->lives, "CAN", (Color){200, 50, 50, 220});
             DrawResourceText((Vector2){130, 8}, g->gold, "ALTIN", (Color){200, 160, 0, 220});
             DrawResourceText((Vector2){290, 8}, g->score, "SKOR", (Color){80, 180, 220, 220});
+            /* T86 — Market geliri göstergesi */
+            if (g->managers.marketIncome > 0) {
+                char incbuf[24];
+                snprintf(incbuf, sizeof(incbuf), "+%d/tick", g->managers.marketIncome);
+                DrawText(incbuf, 220, 26, 10, (Color){180, 220, 80, 200});
+            }
 
             /* Sağ: Dalga / Hız / Kill */
             char buf[128];
@@ -755,8 +917,8 @@ void UpdateLevelComplete(Game *g, float dt) {
 
             Rectangle btn  = {(float)SCREEN_WIDTH / 2 - 100, (float)SCREEN_HEIGHT / 2 + 10, 200, 56};
             Rectangle sBtn = {(float)SCREEN_WIDTH / 2 - 80,  (float)SCREEN_HEIGHT / 2 + 74, 160, 40};
-            DrawButton(btn,  "OYUNA BASLA", GREEN,    BLACK);
-            DrawButton(sBtn, "AYARLAR [S]", DARKGRAY, WHITE);
+            DrawButton(btn,  T("BTN_START"),    GREEN,    BLACK);
+            DrawButton(sBtn, T("BTN_SETTINGS"), DARKGRAY, WHITE);
         }
 
         /* ============================================================
@@ -769,44 +931,39 @@ void UpdateLevelComplete(Game *g, float dt) {
 
             Rectangle panel = {(float)SCREEN_WIDTH / 2 - 180, (float)SCREEN_HEIGHT / 2 - 120, 360,
                                260};
-            DrawEpicPanel(panel, "DURAKLATILDI");
+            DrawEpicPanel(panel, T("PAUSE_TITLE"));
 
             Rectangle resume = {(float)SCREEN_WIDTH / 2 - 90, (float)SCREEN_HEIGHT / 2 - 10, 180,
                                 50};
             Rectangle quit = {(float)SCREEN_WIDTH / 2 - 90, (float)SCREEN_HEIGHT / 2 + 72, 180, 50};
-            DrawButton(resume, "DEVAM ET", DARKGREEN, WHITE);
-            DrawButton(quit, "CIK", DARKGRAY, WHITE);
+            DrawButton(resume, T("BTN_RESUME"), DARKGREEN, WHITE);
+            DrawButton(quit,   T("BTN_BACK"),   DARKGRAY,  WHITE);
         }
 
         /* ============================================================
-         * T57 — DrawSettingsMenu / UpdateSettingsMenu
+         * T57/T58 — DrawSettingsMenu / UpdateSettingsMenu + Key Rebinding
          * ============================================================ */
 
-        static int g_settingsSel = 0; /* seçili satır: 0-5 */
+        static int g_settingsSel  = 0; /* ana sayfa seçili satır (0-4) */
+        static int g_settingsPage = 0; /* 0=ana ayarlar, 1=tuş atamaları */
+        static int g_rebindSel    = 0; /* tuş atamaları sayfasında seçili eylem */
+        static int g_listeningFor = -1; /* >= 0: hangi KeyAction bekleniyor */
 
-        /* Hacimli slider çizer: sol kenarda etiket, sağda dolu bar */
         static void DrawSlider(float x, float y, float w, float h,
                                const char *label, float value, bool selected) {
-            Color bg  = selected ? (Color){60, 80, 120, 200} : (Color){30, 35, 55, 180};
+            Color bg   = selected ? (Color){60, 80, 120, 200} : (Color){30, 35, 55, 180};
             Color fill = (Color){80, 180, 100, 255};
             DrawRectangleRec((Rectangle){x, y, w, h}, bg);
             if (selected)
                 DrawRectangleLinesEx((Rectangle){x, y, w, h}, 2, (Color){140, 200, 255, 255});
-            /* metin */
-            DrawTextEx(g_ui.body, label, (Vector2){x + 10, y + h * 0.25f},
-                       UIS(18.0f), 1, WHITE);
-            /* bar arka planı */
-            float bx = x + w * 0.55f;
-            float bw = w * 0.38f;
+            DrawTextEx(g_ui.body, label, (Vector2){x + 10, y + h * 0.25f}, UIS(18.0f), 1, WHITE);
+            float bx = x + w * 0.55f, bw = w * 0.38f;
             DrawRectangle((int)bx, (int)(y + h * 0.35f), (int)bw, (int)(h * 0.3f),
                           (Color){20, 20, 30, 220});
-            /* dolum */
             DrawRectangle((int)bx, (int)(y + h * 0.35f), (int)(bw * value), (int)(h * 0.3f), fill);
-            /* yüzde */
             char pct[8];
             snprintf(pct, sizeof(pct), "%d%%", (int)(value * 100));
-            DrawTextEx(g_ui.body, pct,
-                       (Vector2){bx + bw + 8, y + h * 0.25f}, UIS(16.0f), 1, UI_IVORY);
+            DrawTextEx(g_ui.body, pct, (Vector2){bx + bw + 8, y + h * 0.25f}, UIS(16.0f), 1, UI_IVORY);
         }
 
         static void DrawToggleRow(float x, float y, float w, float h,
@@ -815,52 +972,161 @@ void UpdateLevelComplete(Game *g, float dt) {
             DrawRectangleRec((Rectangle){x, y, w, h}, bg);
             if (selected)
                 DrawRectangleLinesEx((Rectangle){x, y, w, h}, 2, (Color){140, 200, 255, 255});
-            DrawTextEx(g_ui.body, label, (Vector2){x + 10, y + h * 0.25f},
-                       UIS(18.0f), 1, WHITE);
-            const char *val = value ? "ACIK" : "KAPALI";
+            DrawTextEx(g_ui.body, label, (Vector2){x + 10, y + h * 0.25f}, UIS(18.0f), 1, WHITE);
+            const char *val = value ? T("TOGGLE_ON") : T("TOGGLE_OFF");
             Color vc = value ? (Color){80, 200, 100, 255} : (Color){180, 80, 80, 255};
-            DrawTextEx(g_ui.body, val,
-                       (Vector2){x + w * 0.7f, y + h * 0.25f}, UIS(18.0f), 1, vc);
+            DrawTextEx(g_ui.body, val, (Vector2){x + w * 0.7f, y + h * 0.25f}, UIS(18.0f), 1, vc);
+        }
+
+        /* Dil satırı: TR ↔ EN gösterir */
+        static void DrawLangRow(float x, float y, float w, float h, bool isEN, bool selected) {
+            Color bg = selected ? (Color){60, 80, 120, 200} : (Color){30, 35, 55, 180};
+            DrawRectangleRec((Rectangle){x, y, w, h}, bg);
+            if (selected)
+                DrawRectangleLinesEx((Rectangle){x, y, w, h}, 2, (Color){140, 200, 255, 255});
+            DrawTextEx(g_ui.body, "Dil / Language", (Vector2){x + 10, y + h * 0.25f}, UIS(18.0f), 1, WHITE);
+            const char *val = isEN ? "EN" : "TR";
+            Color vc = (Color){80, 200, 255, 255};
+            DrawTextEx(g_ui.body, val, (Vector2){x + w * 0.7f, y + h * 0.25f}, UIS(18.0f), 1, vc);
+        }
+
+        static void DrawNavRow(float x, float y, float w, float h,
+                               const char *label, bool selected) {
+            Color bg = selected ? (Color){60, 80, 120, 200} : (Color){30, 35, 55, 180};
+            DrawRectangleRec((Rectangle){x, y, w, h}, bg);
+            if (selected)
+                DrawRectangleLinesEx((Rectangle){x, y, w, h}, 2, (Color){140, 200, 255, 255});
+            DrawTextEx(g_ui.body, label, (Vector2){x + 10, y + h * 0.25f}, UIS(18.0f), 1, WHITE);
+            DrawTextEx(g_ui.body, ">", (Vector2){x + w - 24, y + h * 0.25f}, UIS(18.0f), 1,
+                       (Color){180, 220, 255, 220});
+        }
+
+        /* T58 — Tuş atamaları sayfasını çizer */
+        static void DrawKeybindPage(Game *g) {
+            float pw = 520, ph = 500;
+            float px = SCREEN_WIDTH / 2.0f - pw / 2.0f;
+            float py = SCREEN_HEIGHT / 2.0f - ph / 2.0f;
+            DrawEpicPanel((Rectangle){px, py, pw, ph}, T("KEYBINDS_TITLE"));
+
+            float rh = 34, gap = 4;
+            float rx = px + 16, rw = pw - 32;
+            float ry = py + 56;
+
+            for (int i = 0; i < KA_COUNT; i++) {
+                bool sel = (g_rebindSel == i);
+                bool listening = (g_listeningFor == i);
+                Color bg = listening ? (Color){80, 40, 10, 220}
+                         : sel       ? (Color){60, 80, 120, 200}
+                                     : (Color){30, 35, 55, 160};
+                float iy = ry + i * (rh + gap);
+                DrawRectangleRec((Rectangle){rx, iy, rw, rh}, bg);
+                if (sel || listening)
+                    DrawRectangleLinesEx((Rectangle){rx, iy, rw, rh}, 2,
+                        listening ? (Color){255, 160, 40, 255} : (Color){140, 200, 255, 255});
+
+                DrawTextEx(g_ui.body, KeyActionLabel((KeyAction)i),
+                           (Vector2){rx + 10, iy + rh * 0.22f}, UIS(16.0f), 1, WHITE);
+
+                const char *kname = listening ? T("KEYBINDS_LISTEN") : KeyName(g->settings.keymap[i]);
+                Color kc = listening ? (Color){255, 200, 80, 255} : (Color){120, 220, 140, 255};
+                float tw = MeasureTextEx(g_ui.body, kname, UIS(16.0f), 1).x;
+                DrawTextEx(g_ui.body, kname,
+                           (Vector2){rx + rw - tw - 14, iy + rh * 0.22f}, UIS(16.0f), 1, kc);
+            }
+
+            float by = py + ph - 52;
+            Rectangle bBack = {px + pw / 2.0f - 95, by, 190, 40};
+            DrawButton(bBack, T("BTN_BACK_ESC"), DARKGRAY, WHITE);
+
+            DrawBodyText(T("KEYBINDS_HINT"),
+                         (Vector2){px + 10, py + ph - 20}, 13.0f, (Color){130, 130, 150, 200});
         }
 
         void DrawSettingsMenu(Game *g) {
             DrawRectangleGradientV(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
                                    (Color){6, 8, 18, 255}, (Color){18, 22, 40, 255});
 
-            float pw = 480, ph = 360;
+            if (g_settingsPage == 1) {
+                DrawKeybindPage(g);
+                return;
+            }
+
+            float pw = 480, ph = 444;
             float px = SCREEN_WIDTH / 2.0f - pw / 2.0f;
             float py = SCREEN_HEIGHT / 2.0f - ph / 2.0f;
-            DrawEpicPanel((Rectangle){px, py, pw, ph}, "AYARLAR");
+            DrawEpicPanel((Rectangle){px, py, pw, ph}, T("SETTINGS_TITLE"));
 
             float rh = 46, gap = 8;
             float rx = px + 20, rw = pw - 40;
             float ry = py + 60;
+            bool isEN = (g->settings.language == LANG_EN);
 
-            DrawToggleRow(rx, ry,           rw, rh, "Tam Ekran",      g->settings.fullscreen,   g_settingsSel == 0);
-            DrawSlider   (rx, ry + (rh+gap),    rw, rh, "Ana Ses",    g->settings.masterVolume, g_settingsSel == 1);
-            DrawSlider   (rx, ry + (rh+gap)*2,  rw, rh, "SFX Ses",   g->settings.sfxVolume,    g_settingsSel == 2);
-            DrawSlider   (rx, ry + (rh+gap)*3,  rw, rh, "Muzik Ses", g->settings.musicVolume,  g_settingsSel == 3);
+            DrawToggleRow(rx, ry,                rw, rh, T("SET_FULLSCREEN"), g->settings.fullscreen,   g_settingsSel == 0);
+            DrawSlider   (rx, ry + (rh+gap),     rw, rh, T("SET_MASTER_VOL"), g->settings.masterVolume, g_settingsSel == 1);
+            DrawSlider   (rx, ry + (rh+gap)*2,   rw, rh, T("SET_SFX_VOL"),    g->settings.sfxVolume,    g_settingsSel == 2);
+            DrawSlider   (rx, ry + (rh+gap)*3,   rw, rh, T("SET_MUSIC_VOL"),  g->settings.musicVolume,  g_settingsSel == 3);
+            DrawLangRow  (rx, ry + (rh+gap)*4,   rw, rh, isEN,                                             g_settingsSel == 4);
+            DrawNavRow   (rx, ry + (rh+gap)*5,   rw, rh, T("SET_KEYBINDS"),                             g_settingsSel == 5);
 
-            /* Kaydet / Geri butonları */
             float by = py + ph - 70;
-            Rectangle bSave = {px + 30,        by, 190, 44};
-            Rectangle bBack = {px + pw - 220,  by, 190, 44};
-            DrawButton(bSave, "KAYDET",  DARKGREEN, WHITE);
-            DrawButton(bBack, "GERI",    DARKGRAY,  WHITE);
+            Rectangle bSave = {px + 30,       by, 190, 44};
+            Rectangle bBack = {px + pw - 220, by, 190, 44};
+            DrawButton(bSave, T("BTN_SAVE"), DARKGREEN, WHITE);
+            DrawButton(bBack, T("BTN_BACK"), DARKGRAY,  WHITE);
 
-            DrawBodyText("Sol/Sag: deger degistir   |   Enter/Space: togla   |   ESC: geri",
-                         (Vector2){px + 10, py + ph - 22}, 14.0f, (Color){140,140,160,200});
+            DrawBodyText(T("SETTINGS_HINT"),
+                         (Vector2){px + 10, py + ph - 22}, 14.0f, (Color){140, 140, 160, 200});
         }
 
-        /* Ayarları AudioManager'a uygular */
         static void ApplySettings(Game *g) {
             g->audio.masterVolume = g->settings.masterVolume;
             if (g->settings.fullscreen != IsWindowFullscreen())
                 ToggleFullscreen();
+            I18nLoad(g->settings.language); /* T59 — dil değişince yeniden yükle */
+        }
+
+        /* T58 — Varsayılan keymap'ten tek eylemi sıfırlar */
+        static void ResetKeybindToDefault(Settings *s, int action) {
+            Settings def;
+            DefaultSettings(&def);
+            s->keymap[action] = def.keymap[action];
         }
 
         void UpdateSettingsMenu(Game *g) {
-            int itemCount = 4;
+            /* --- Tuş atamaları sayfası --- */
+            if (g_settingsPage == 1) {
+                if (g_listeningFor >= 0) {
+                    /* Bekleme modu: herhangi bir tuşa basılınca ata */
+                    int pressed = GetKeyPressed();
+                    if (pressed == KEY_ESCAPE) {
+                        g_listeningFor = -1; /* iptal */
+                    } else if (pressed != 0) {
+                        g->settings.keymap[g_listeningFor] = pressed;
+                        SaveSettings(&g->settings);
+                        g_listeningFor = -1;
+                    }
+                    return;
+                }
+                if (IsKeyPressed(KEY_UP))
+                    g_rebindSel = (g_rebindSel - 1 + KA_COUNT) % KA_COUNT;
+                if (IsKeyPressed(KEY_DOWN))
+                    g_rebindSel = (g_rebindSel + 1) % KA_COUNT;
+                if (IsKeyPressed(KEY_ENTER))
+                    g_listeningFor = g_rebindSel;
+                if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_BACKSPACE))
+                    ResetKeybindToDefault(&g->settings, g_rebindSel);
+
+                float pw = 520, ph = 500;
+                float px = SCREEN_WIDTH / 2.0f - pw / 2.0f;
+                float py = SCREEN_HEIGHT / 2.0f - ph / 2.0f;
+                Rectangle bBack = {px + pw / 2.0f - 95, py + ph - 52, 190, 40};
+                if (IsButtonClicked(bBack) || IsKeyPressed(KEY_ESCAPE))
+                    g_settingsPage = 0;
+                return;
+            }
+
+            /* --- Ana ayarlar sayfası --- */
+            int itemCount = 6;
             float step = 0.05f;
 
             if (IsKeyPressed(KEY_UP))   g_settingsSel = (g_settingsSel - 1 + itemCount) % itemCount;
@@ -872,14 +1138,21 @@ void UpdateLevelComplete(Game *g, float dt) {
             else if (g_settingsSel == 3) vol = &g->settings.musicVolume;
 
             if (vol) {
-                if (IsKeyDown(KEY_LEFT))  *vol = (*vol - step < 0.0f)   ? 0.0f   : *vol - step;
-                if (IsKeyDown(KEY_RIGHT)) *vol = (*vol + step > 1.0f)   ? 1.0f   : *vol + step;
+                if (IsKeyDown(KEY_LEFT))  *vol = (*vol - step < 0.0f) ? 0.0f : *vol - step;
+                if (IsKeyDown(KEY_RIGHT)) *vol = (*vol + step > 1.0f) ? 1.0f : *vol + step;
             }
             if (g_settingsSel == 0 && (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER)))
                 g->settings.fullscreen = !g->settings.fullscreen;
+            /* T59 — dil toggle: TR ↔ EN */
+            if (g_settingsSel == 4 && (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER) ||
+                                        IsKeyPressed(KEY_LEFT)  || IsKeyPressed(KEY_RIGHT))) {
+                g->settings.language = (g->settings.language == LANG_TR) ? LANG_EN : LANG_TR;
+                I18nLoad(g->settings.language);
+            }
+            if (g_settingsSel == 5 && (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER)))
+                g_settingsPage = 1;
 
-            /* Panel butonları */
-            float pw = 480, ph = 360;
+            float pw = 480, ph = 444;
             float px = SCREEN_WIDTH / 2.0f - pw / 2.0f;
             float py = SCREEN_HEIGHT / 2.0f - ph / 2.0f;
             float by = py + ph - 70;
@@ -895,6 +1168,7 @@ void UpdateLevelComplete(Game *g, float dt) {
                     SaveSettings(&g->settings);
                     LOG_INFO("Ayarlar kaydedildi");
                 }
+                g_settingsPage = 0;
                 g->state = g->preSettingsState;
             }
         }
@@ -912,18 +1186,18 @@ void UpdateLevelComplete(Game *g, float dt) {
             DrawEpicPanel(panel, NULL);
 
             DrawShadowText(
-                g_ui.title, "YENILGI",
+                g_ui.title, T("GAMEOVER_TITLE"),
                 (Vector2){(float)SCREEN_WIDTH / 2 - UIS(100), (float)SCREEN_HEIGHT / 2 - 130},
                 UIS(64.0f), 2.0f, (Color){220, 50, 50, 255});
 
             char buf[64];
-            snprintf(buf, sizeof(buf), "Skor: %d   Dusmanlar: %d", g->score, g->enemiesKilled);
+            snprintf(buf, sizeof(buf), T("GAMEOVER_STATS"), g->score, g->enemiesKilled);
             DrawBodyText(
                 buf, (Vector2){(float)SCREEN_WIDTH / 2 - UIS(115), (float)SCREEN_HEIGHT / 2 - 20},
                 20.0f, UI_IVORY);
 
             Rectangle btn = {(float)SCREEN_WIDTH / 2 - 110, (float)SCREEN_HEIGHT / 2 + 50, 220, 56};
-            DrawButton(btn, "Yeniden Baslat [R]", DARKGRAY, WHITE);
+            DrawButton(btn, T("BTN_PLAY_AGAIN"), DARKGRAY, WHITE);
         }
 
         /* ============================================================
@@ -939,7 +1213,7 @@ void UpdateLevelComplete(Game *g, float dt) {
             DrawEpicPanel(panel, NULL);
 
             DrawEpicTitle(
-                "ZAFER!",
+                T("VICTORY_TITLE"),
                 (Vector2){(float)SCREEN_WIDTH / 2 - UIS(72), (float)SCREEN_HEIGHT / 2 - 130},
                 72.0f);
 
@@ -950,7 +1224,7 @@ void UpdateLevelComplete(Game *g, float dt) {
                 24.0f, UI_IVORY);
 
             Rectangle btn = {(float)SCREEN_WIDTH / 2 - 110, (float)SCREEN_HEIGHT / 2 + 50, 220, 56};
-            DrawButton(btn, "Yeniden Baslat [R]", DARKGREEN, BLACK);
+            DrawButton(btn, T("BTN_PLAY_AGAIN"), DARKGREEN, BLACK);
         }
 
         /* ============================================================
@@ -1132,6 +1406,8 @@ void UpdateLevelComplete(Game *g, float dt) {
             DrawTowerSynergies(g);
             DrawTowers(g);
             DrawFriendlyUnits(g);
+            DrawOutposts(g);
+            DrawGuardians(g);
             DrawEnemies(g);
             DrawProjectiles(g);
             DrawParticles(g);
@@ -1354,6 +1630,180 @@ void UpdateLevelComplete(Game *g, float dt) {
         }
 
         /* ============================================================
+         * T90 — DrawDetailTooltip: Nadirlik renkli detay kutusu
+         * ============================================================ */
+
+        /* T92 — 5 kademe: rarity.c fonksiyonları kullanılıyor */
+
+        static const char *T90_FLAVOR[] = {
+            "Gökyüzü kıran bir bıçak.", "Çelik gibi sert, irade gibi katı.",
+            "Gizemli güçler barındırır.", "Hasarı anında onarır.",
+            "Kalkan kıran darbe.", "Rüzgâr gibi çeviktir.",
+            "Ejderin nefesinden doğdu.", "Toprağı hisseden bir ayak.",
+        };
+
+        /* x,y — tooltip'in sol-üst köşesi */
+        static void DrawDetailTooltip(int x, int y, const char *name, int rarity,
+                                      const char *stats, const char *flavor) {
+            if (rarity < 0) rarity = RARITY_COMMON;
+            if (rarity >= RARITY_COUNT) rarity = RARITY_COUNT - 1;
+            Color rc = RarityColor((ItemRarity)rarity);
+
+            int pw = 240, ph = 96;
+            if (x + pw > SCREEN_WIDTH)  x = SCREEN_WIDTH  - pw - 4;
+            if (y + ph > SCREEN_HEIGHT) y = SCREEN_HEIGHT - ph - 4;
+
+            DrawRectangle(x, y, pw, ph, (Color){10, 10, 20, 235});
+            DrawRectangleLines(x, y, pw, ph, rc);
+            DrawRectangle(x, y, pw, 18, (Color){rc.r, rc.g, rc.b, 60});
+            char hdr[48];
+            snprintf(hdr, sizeof(hdr), "[ %s ]", RarityLabel((ItemRarity)rarity));
+            DrawText(hdr, x + pw / 2 - MeasureText(hdr, 11) / 2, y + 4, 11, rc);
+            DrawText(name, x + 8, y + 24, 15, WHITE);
+            if (stats && stats[0])
+                DrawText(stats, x + 8, y + 44, 12, (Color){200, 220, 180, 220});
+            /* T92 — flavor: önce isim tablosuna bak, yoksa rarity flavor */
+            const char *flv = (flavor && flavor[0])
+                              ? flavor
+                              : RarityFlavor(name, (ItemRarity)rarity);
+            if (flv && flv[0])
+                DrawText(flv, x + 8, y + 72, 11, (Color){160, 150, 130, 200});
+        }
+
+        /* ============================================================
+         * T89 — GenerateLootChest / DrawLootChest
+         * ============================================================ */
+
+        /* Level biterken çağrılır; dalga sayısı + yıldıra göre ödül üretir */
+        void GenerateLootChest(Game *g) {
+            LootChest *lc = &g->lootChest;
+            memset(lc, 0, sizeof(LootChest));
+            lc->visible    = true;
+            lc->animDone   = false;
+            lc->openTimer  = 0.0f;
+
+            /* Temel altın: wave sayısı * 20 + yıldız bonusu */
+            lc->itemGold = (g->currentWave + 1) * 20 + g->levelStars * 30;
+            lc->itemCount = 0;
+
+            /* Sabit eşya listesi: dalga sayısına göre rastgele seç */
+            static const char *ITEM_POOL[][3] = {
+                /* isim, rarity(0-3 as string) — dummy encoding */
+                {"Keskin Kılıç",   "2", ""},
+                {"Demir Zırh",     "1", ""},
+                {"Büyülü Rün",     "3", ""},
+                {"Şifa İksiri",    "0", ""},
+                {"Komutan Kalkanı","2", ""},
+                {"Hız Tılsımı",    "1", ""},
+                {"Ejder Kolyesi",  "3", ""},
+                {"Savaşçı Çizmesi","0", ""},
+            };
+            int poolSize = 8;
+            int wave = g->currentWave + 1;
+            /* Her 3 dalgada bir ekstra eşya, max 6 */
+            int count = 2 + wave / 3;
+            if (count > MAX_CHEST_ITEMS) count = MAX_CHEST_ITEMS;
+
+            for (int i = 0; i < count; i++) {
+                int idx = (wave * 7 + i * 13) % poolSize;
+                strncpy(lc->itemNames[i], ITEM_POOL[idx][0], 31);
+                /* T92 — RollRarity: dalga * yıldız bazlı */
+                int seed = wave * (g->levelStars + 1);
+                ItemRarity r = RollRarity(seed, i);
+                lc->itemRarity[i] = (int)r;
+                lc->itemCount++;
+            }
+        }
+
+        /* Sandık animasyonu + eşya listesi çizer */
+        static void DrawLootChest(Game *g, int cx, int cy) {
+            LootChest *lc = &g->lootChest;
+
+            /* Animasyon: openTimer 0→1, 0.9 saniyede */
+            if (!lc->animDone) {
+                lc->openTimer += GetFrameTime() * 1.1f;
+                if (lc->openTimer >= 1.0f) { lc->openTimer = 1.0f; lc->animDone = true; }
+            }
+
+            float t = lc->openTimer;
+            /* Sandık gövdesi */
+            int bw = 90, bh = 54;
+            DrawRectangle(cx - bw/2, cy - bh/2, bw, bh, (Color){110, 72, 20, 255});
+            DrawRectangleLines(cx - bw/2, cy - bh/2, bw, bh, (Color){200, 155, 40, 255});
+            /* Kilit levha */
+            DrawRectangle(cx - 8, cy - 6, 16, 14, (Color){180, 140, 30, 255});
+            /* Kapak: t=0 kapalı (0°), t=1 açık (-80°) */
+            float lidAngle = -80.0f * t;
+            float lidH = (float)bh * 0.45f;
+            /* Kapak köşe noktaları (basit dikdörtgen döndürme) */
+            float rad = lidAngle * 3.14159f / 180.0f;
+            float x0 = (float)(cx - bw/2), y0 = (float)(cy - bh/2);
+            float x1 = (float)(cx + bw/2), y1 = (float)(cy - bh/2);
+            float hx = cosf(rad) * 0.0f - sinf(rad) * (-lidH);
+            float hy = sinf(rad) * 0.0f + cosf(rad) * (-lidH);
+            DrawTriangle((Vector2){x0, y0}, (Vector2){x1, y1},
+                         (Vector2){x1 + hx, y1 + hy}, (Color){140, 90, 25, 220});
+            DrawTriangle((Vector2){x0, y0}, (Vector2){x1 + hx, y1 + hy},
+                         (Vector2){x0 + hx, y0 + hy}, (Color){140, 90, 25, 220});
+            /* Kapak çerçeve */
+            DrawLineEx((Vector2){x0, y0}, (Vector2){x0 + hx, y0 + hy}, 2.0f,
+                       (Color){200, 155, 40, 255});
+            DrawLineEx((Vector2){x1, y1}, (Vector2){x1 + hx, y1 + hy}, 2.0f,
+                       (Color){200, 155, 40, 255});
+
+            /* Açılınca parıltı */
+            if (t > 0.7f) {
+                float glow = (t - 0.7f) / 0.3f;
+                DrawCircle(cx, cy - bh/2 - 10, 22.0f * glow, (Color){255, 230, 80, (unsigned char)(120 * glow)});
+            }
+
+            /* Nadirlik renk tablosu */
+            /* T92 — 5 kademe rarity */
+            static const Color RARITY_COLORS[RARITY_COUNT] = {
+                {180, 180, 180, 255}, /* Common    */
+                {80,  200, 80,  255}, /* Uncommon  */
+                {80,  140, 230, 255}, /* Rare      */
+                {180, 60,  240, 255}, /* Epic      */
+                {255, 200, 40,  255}, /* Mythical  */
+            };
+            static const char *RARITY_NAMES[RARITY_COUNT] = {
+                "Yaygın","Nadir","Seyrek","Destansı","Efsanevi"
+            };
+
+            /* Eşya listesi: sandığın sağında */
+            if (lc->animDone) {
+                int lx = cx + bw/2 + 20;
+                int ly = cy - lc->itemCount * 13;
+                Vector2 mp = GetMousePosition();
+                int hoveredItem = -1;
+                for (int i = 0; i < lc->itemCount; i++) {
+                    Color rc = RARITY_COLORS[lc->itemRarity[i]];
+                    char line[64];
+                    snprintf(line, sizeof(line), "[%s] %s",
+                             RARITY_NAMES[lc->itemRarity[i]], lc->itemNames[i]);
+                    int iy = ly + i * 26;
+                    DrawText(line, lx, iy, 14, rc);
+                    /* T90 — hover tespiti */
+                    Rectangle row = {(float)lx, (float)iy, 220.0f, 22.0f};
+                    if (CheckCollisionPointRec(mp, row)) hoveredItem = i;
+                }
+                /* T90 — Tooltip: üzerine gelinen eşya */
+                if (hoveredItem >= 0) {
+                    int fi = hoveredItem % 8;
+                    DrawDetailTooltip((int)mp.x + 12, (int)mp.y - 50,
+                                      lc->itemNames[hoveredItem],
+                                      lc->itemRarity[hoveredItem],
+                                      "+5 Hasar  +3 Zırh",
+                                      T90_FLAVOR[fi]);
+                }
+                /* Altın ödülü */
+                char gbuf[32];
+                snprintf(gbuf, sizeof(gbuf), "+%d Altin", lc->itemGold);
+                DrawText(gbuf, cx - MeasureText(gbuf, 16) / 2, cy + bh/2 + 14, 16, GOLD);
+            }
+        }
+
+        /* ============================================================
          * DrawLevelComplete — Yıldız / ödül ekranı
          * ============================================================ */
 
@@ -1388,12 +1838,21 @@ void UpdateLevelComplete(Game *g, float dt) {
             /* Completion diyaloğu */
             DrawDialogueBox(g);
 
+            /* T89 — Loot Chest */
+            if (g->lootChest.visible)
+                DrawLootChest(g, SCREEN_WIDTH / 2, 430);
+
             /* Devam butonu (diyalog bittiyse) */
             if (!g->dialogue.active) {
                 bool isLast = (g->currentLevel + 1 >= MAX_LEVELS);
                 Rectangle btn = {SCREEN_WIDTH / 2.0f - 100, (float)SCREEN_HEIGHT - 120, 200, 55};
                 DrawButton(btn, isLast ? "KAMPANYA BITTI!" : "Haritaya Don",
                            isLast ? GOLD : DARKGREEN, isLast ? BLACK : WHITE);
+                /* Sandık altınını topla */
+                if (IsButtonClicked(btn) && g->lootChest.itemGold > 0) {
+                    g->gold += g->lootChest.itemGold;
+                    g->lootChest.itemGold = 0;
+                }
             }
         }
 
@@ -1461,6 +1920,22 @@ void UpdateLevelComplete(Game *g, float dt) {
             char sellLabel[32];
             snprintf(sellLabel, sizeof(sellLabel), "Sat (+%dg)", GetTowerCost(t->type) / 2);
             DrawButton(sellBtn, sellLabel, (Color){120, 35, 35, 255}, WHITE);
+
+            /* T90 — Kule detay tooltip */
+            {
+                static const char *TOWER_NAMES[TOWER_TYPE_COUNT] = {"Temel Kule","Keskin Nişancı","Patlama Kulesi"};
+                static const char *TOWER_FLAVOR[TOWER_TYPE_COUNT] = {
+                    "Güvenilir, sıradan ama vazgeçilmez.",
+                    "Uzaktan seçer, asla ıskalamaz.",
+                    "Kalabalığı dağıtır, savaşı şekillendirir.",
+                };
+                char tstats[48];
+                snprintf(tstats, sizeof(tstats), "Hasar:%.0f  Menzil:%.0f  Lv:%d",
+                         t->damage, t->range, t->level);
+                int rarity = (t->type == TOWER_SNIPER) ? 1 : (t->type == TOWER_SPLASH) ? 2 : 0;
+                DrawDetailTooltip((int)mx + 148, (int)my, TOWER_NAMES[t->type], rarity,
+                                  tstats, TOWER_FLAVOR[t->type]);
+            }
         }
 
         /* ============================================================
@@ -1513,5 +1988,221 @@ void UpdateLevelComplete(Game *g, float dt) {
         /* ============================================================
          * T43 — UpdatePrepPhase / DrawPrepPhase
          * ============================================================ */
+
+/* ============================================================
+ * T93 — DrawForgeUI: Blacksmith NPC paneli
+ * ============================================================ */
+
+/* Demirci NPC replikleri — LORE.md bağlantısı */
+static const char *FORGE_NPC_LINES[] = {
+    "\"Ates soner, demir konusur. Ne getireceksin?\"",
+    "\"Bu kalkani taniyorum... Eski bir ustanin isi.\"",
+    "\"Guclendir, komutan. Zira dusman beklemiyor.\"",
+    "\"Ejder celik istemiyorsan, siraya gir.\"",
+    "\"Demir Cevheri getir, seni geri gondermeyeyim.\"",
+};
+#define FORGE_LINE_COUNT 5
+
+/* T94 — Upgrade başarı ihtimali (0-100) */
+static int ForgeSuccessChance(int curLevel) {
+    if (curLevel < 3) return 100;
+    if (curLevel == 3) return 70;
+    if (curLevel == 4) return 50;
+    if (curLevel == 5) return 30;
+    return 15;
+}
+
+/* T94 — Slot bazlı stat ekleme (ApplyEquipStats'ı taklit eder, ama sadece delta) */
+static void ForgeAddUpgradeStat(Hero *hero, EquipSlot slot) {
+    switch (slot) {
+    case EQUIP_WEAPON:  hero->stats.atk   += 1.5f; break;
+    case EQUIP_ARMOR:   hero->stats.def   += 1.0f; break;
+    case EQUIP_HEAD:    hero->stats.hp     = hero->stats.hp + 8.0f;
+                        hero->stats.maxHp += 8.0f; break;
+    case EQUIP_ACCESS:  hero->stats.speed += 0.2f; break;
+    default: break;
+    }
+}
+
+/* T94 — Stat geri al (başarısızlık -1 level düşünce bir önceki bonus çıkarılır) */
+static void ForgeRemoveUpgradeStat(Hero *hero, EquipSlot slot) {
+    switch (slot) {
+    case EQUIP_WEAPON:  hero->stats.atk   -= 1.5f; break;
+    case EQUIP_ARMOR:   hero->stats.def   -= 1.0f; break;
+    case EQUIP_HEAD:    hero->stats.hp     = hero->stats.hp - 8.0f;
+                        hero->stats.maxHp -= 8.0f; break;
+    case EQUIP_ACCESS:  hero->stats.speed -= 0.2f; break;
+    default: break;
+    }
+}
+
+void DrawForgeUI(Game *g) {
+    static char feedbackMsg[48] = {0};
+    static float feedbackTimer  = 0.0f;
+    static Color feedbackCol    = {255, 255, 255, 255};
+
+    float dt = GetFrameTime();
+    if (feedbackTimer > 0.0f) feedbackTimer -= dt;
+
+    /* Glow timers */
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++)
+        if (g->hero.equip[s].upgradeGlow > 0.0f)
+            g->hero.equip[s].upgradeGlow -= dt;
+
+    int pw = 580, ph = 480;
+    int px = SCREEN_WIDTH  / 2 - pw / 2;
+    int py = SCREEN_HEIGHT / 2 - ph / 2;
+
+    /* Koyu örtü */
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, (Color){0, 0, 0, 170});
+
+    /* Panel */
+    DrawRectangle(px, py, pw, ph, (Color){18, 10, 6, 248});
+    DrawRectangleLines(px, py, pw, ph, (Color){255, 100, 30, 210});
+    DrawRectangleLines(px + 2, py + 2, pw - 4, ph - 4, (Color){160, 55, 10, 100});
+
+    /* Başlık */
+    float t = (float)GetTime();
+    const char *title = "DEMIRCI";
+    DrawText(title, px + pw / 2 - MeasureText(title, 28) / 2, py + 12, 28,
+             (Color){255, 140, 40, 255});
+
+    /* NPC portret */
+    int ax = px + 32, ay = py + 52;
+    DrawRectangle(ax, ay + 20, 38, 14, (Color){90, 80, 72, 255});
+    DrawRectangle(ax - 5, ay + 14, 48, 9, (Color){110, 100, 90, 255});
+    DrawRectangle(ax + 13, ay + 34, 12, 22, (Color){72, 64, 56, 255});
+    DrawRectangle(ax + 46, ay + 6, 6, 36, (Color){130, 95, 55, 255});
+    DrawRectangle(ax + 38, ay - 2, 20, 16, (Color){150, 145, 140, 255});
+    for (int s = 0; s < 5; s++) {
+        float sx = ax + 38 + cosf(t * 3.2f + s * 1.3f) * 13;
+        float sy = ay + 8  + sinf(t * 4.1f + s * 1.0f) * 7 - 3;
+        DrawCircle((int)sx, (int)sy, 1.8f, (Color){255, (unsigned char)(180 + s * 15), 20, 200});
+    }
+    DrawText("Gareth", ax, ay + 62, 11, (Color){190, 150, 90, 210});
+
+    /* Diyalog */
+    int dlgX = px + 100, dlgY = py + 52, dlgW = pw - 118, dlgH = 54;
+    DrawRectangle(dlgX, dlgY, dlgW, dlgH, (Color){10, 7, 4, 220});
+    DrawRectangleLines(dlgX, dlgY, dlgW, dlgH, (Color){130, 80, 35, 150});
+    int lineIdx = ((int)(t * 0.22) + g->currentWave) % FORGE_LINE_COUNT;
+    DrawText(FORGE_NPC_LINES[lineIdx], dlgX + 6, dlgY + 8, 11, (Color){225, 195, 150, 235});
+
+    /* Ayıraç */
+    DrawLine(px + 16, py + 120, px + pw - 16, py + 120, (Color){90, 55, 18, 160});
+
+    /* Malzeme sayacı */
+    char matBuf[64];
+    snprintf(matBuf, sizeof(matBuf), "Demir Cevheri: %d    Buyulu Toz: %d",
+             g->ironOre, g->magicDust);
+    DrawText(matBuf, px + 20, py + 128, 13, (Color){210, 170, 80, 240});
+
+    /* Ayıraç 2 */
+    DrawLine(px + 16, py + 148, px + pw - 16, py + 148, (Color){90, 55, 18, 120});
+
+    /* Ekipman yükseltme listesi */
+    static const char *SLOT_NAMES[EQUIP_SLOT_COUNT] = {"Silah", "Zirh", "Baslik", "Aksesuar"};
+    static const char *STAT_HINTS[EQUIP_SLOT_COUNT]  = {"+1.5 ATK", "+1.0 DEF", "+8 HP", "+0.2 HIZ"};
+    Vector2 mp = GetMousePosition();
+
+    for (int s = 0; s < EQUIP_SLOT_COUNT; s++) {
+        EquippedItem *eq = &g->hero.equip[s];
+        int ry = py + 158 + s * 66;
+
+        /* Satır arka planı */
+        Color rowBg = eq->occupied ? (Color){28, 18, 10, 200} : (Color){15, 12, 10, 160};
+        DrawRectangle(px + 14, ry, pw - 28, 58, rowBg);
+        DrawRectangleLines(px + 14, ry, pw - 28, 58, (Color){80, 50, 20, 160});
+
+        /* Slot etiketi */
+        DrawText(SLOT_NAMES[s], px + 22, ry + 6, 12, (Color){160, 140, 100, 200});
+
+        if (!eq->occupied) {
+            DrawText("(bos)", px + 22, ry + 26, 11, (Color){90, 80, 60, 160});
+            continue;
+        }
+
+        /* Eşya adı + upgrade level */
+        char upgBuf[48];
+        int uLv = eq->upgradeLevel;
+        snprintf(upgBuf, sizeof(upgBuf), "%s  +%d", eq->name, uLv);
+
+        /* Glow rengi */
+        float glow = eq->upgradeGlow;
+        Color nameCol = (glow > 0.0f)
+            ? (Color){255, (unsigned char)(200 + (int)(sinf(t * 8.0f) * 40)), 30, 255}
+            : (Color){220, 190, 130, 255};
+        if (glow > 0.0f) {
+            /* Parıltı dairesi */
+            float r = 8.0f + sinf(t * 6.0f) * 4.0f;
+            DrawCircle(px + 22 + MeasureText(upgBuf, 14) / 2, ry + 26, r,
+                       (Color){255, 200, 50, (unsigned char)(80 * glow)});
+        }
+        DrawText(upgBuf, px + 22, ry + 22, 14, nameCol);
+
+        /* Malzeme maliyeti */
+        int oreCost  = uLv + 1;
+        int dustCost = (uLv >= 3) ? 2 : 1;
+        int chance   = ForgeSuccessChance(uLv);
+        char costBuf[48];
+        snprintf(costBuf, sizeof(costBuf), "Maliyet: %d cevher  %d toz  (%d%%)",
+                 oreCost, dustCost, chance);
+        DrawText(costBuf, px + 22, ry + 40, 10, (Color){150, 130, 90, 200});
+
+        /* Stat ipucu */
+        DrawText(STAT_HINTS[s], px + pw - 150, ry + 10, 11, (Color){100, 180, 100, 200});
+
+        /* Yükselt butonu */
+        Rectangle upBtn = {(float)(px + pw - 110), (float)(ry + 28), 94, 24};
+        bool canUpgrade = (g->ironOre >= oreCost) && (g->magicDust >= dustCost);
+        Color btnBg  = canUpgrade ? (Color){50, 30, 10, 220} : (Color){25, 18, 12, 180};
+        Color btnBrd = canUpgrade ? (Color){255, 130, 40, 220} : (Color){80, 60, 40, 160};
+        bool hovered = CheckCollisionPointRec(mp, upBtn);
+        if (hovered && canUpgrade) btnBg = (Color){80, 45, 15, 240};
+        DrawRectangleRec(upBtn, btnBg);
+        DrawRectangleLinesEx(upBtn, 1.2f, btnBrd);
+        DrawText("Yukselt", (int)(upBtn.x + 12), (int)(upBtn.y + 6), 12,
+                 canUpgrade ? (Color){255, 210, 100, 255} : (Color){100, 85, 60, 180});
+
+        if (hovered && canUpgrade && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            g->ironOre   -= oreCost;
+            g->magicDust -= dustCost;
+
+            /* Başarı kontrolü */
+            int roll = GetRandomValue(1, 100);
+            if (roll <= chance) {
+                ForgeAddUpgradeStat(&g->hero, (EquipSlot)s);
+                eq->upgradeLevel++;
+                eq->upgradeGlow = 2.0f;
+                snprintf(feedbackMsg, sizeof(feedbackMsg), "+%d! Basarili!", eq->upgradeLevel);
+                feedbackCol = (Color){80, 240, 80, 255};
+            } else {
+                /* Başarısız: -1 level, min 0, önceki bonus geri alınır */
+                if (eq->upgradeLevel > 0) {
+                    ForgeRemoveUpgradeStat(&g->hero, (EquipSlot)s);
+                    eq->upgradeLevel--;
+                }
+                snprintf(feedbackMsg, sizeof(feedbackMsg), "Basarisiz! Seviye: +%d", eq->upgradeLevel);
+                feedbackCol = (Color){240, 80, 60, 255};
+            }
+            feedbackTimer = 3.0f;
+        }
+    }
+
+    /* Geri bildirim mesajı */
+    if (feedbackTimer > 0.0f && feedbackMsg[0]) {
+        float alpha = feedbackTimer > 0.5f ? 1.0f : feedbackTimer * 2.0f;
+        Color fc = feedbackCol; fc.a = (unsigned char)(255 * alpha);
+        DrawText(feedbackMsg, px + pw / 2 - MeasureText(feedbackMsg, 16) / 2,
+                 py + ph - 60, 16, fc);
+    }
+
+    /* Kapat butonu */
+    Rectangle closeBtn = {(float)(px + pw / 2 - 65), (float)(py + ph - 38), 130, 28};
+    DrawRectangleRec(closeBtn, (Color){55, 18, 8, 230});
+    DrawRectangleLinesEx(closeBtn, 1.4f, (Color){255, 100, 30, 210});
+    DrawText("[F] Kapat", (int)(closeBtn.x + 30), (int)(closeBtn.y + 7), 13,
+             (Color){255, 175, 90, 245});
+}
 
         /* Dalga arası inşa fazı: bina yerleştirme + geri sayım */

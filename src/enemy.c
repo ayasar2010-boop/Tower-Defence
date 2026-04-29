@@ -256,6 +256,25 @@ void UpdateEnemies(Game *g, float dt) {
 
         if (Vec2Distance(e->position, target) < WAYPOINT_REACH_DIST)
             e->currentWaypoint++;
+
+        /* T87 — Terrain efektleri: hücre türüne göre uygula */
+        {
+            int tc, tr;
+            e->inTallGrass   = false;
+            e->terrainArmor  = 0.0f;
+            if (WorldToGrid(e->position, &tc, &tr)) {
+                unsigned char t = g->terrainLayer[tr][tc];
+                if (t == TERRAIN_MUD) {
+                    /* Çamur: sürekli -%30 hız — slowTimer'ı her frame yenile */
+                    e->slowFactor = 0.7f;
+                    e->slowTimer  = 0.15f;
+                } else if (t == TERRAIN_TALL_GRASS) {
+                    e->inTallGrass = true;
+                } else if (t == TERRAIN_STONY) {
+                    e->terrainArmor = 0.2f; /* %20 hasar azaltma */
+                }
+            }
+        }
     }
 }
 
@@ -278,43 +297,47 @@ void UpdateEnemies(Game *g, float dt) {
                     continue;
             }
 
-            /* Şekil: Normal=daire, Fast=üçgen, Tank=kare
-             * TODO (sprite): DrawTextureRec(g->assets.enemyNormal/Fast/Tank,
-             *                  frameRect, e->position, WHITE)
-             * frameRect: e->animFrame * frameW ile yürüyüş animasyon karesi seçilir */
+            /* T87 — Uzun otta gizlenme: fog görünür ama düşman yarı şeffaf */
+            unsigned char drawAlpha = 255;
+            if (e->inTallGrass)
+                drawAlpha = 90;
+
+            /* T87 — Tall grass alpha uygula */
+            Color ec = e->color;
+            ec.a = drawAlpha;
+
             switch (e->type) {
             case ENEMY_BOSS:
             case ENEMY_NORMAL:
                 if (e->isBoss) {
-                    /* Nabız efekti */
                     float pulse = 1.0f + sinf((float)GetTime() * 4.0f) * 0.2f;
                     if (e->isCasting) {
-                        pulse += 0.5f; /* Büyü hazırlığı: ekstra parlama */
+                        pulse += 0.5f;
                         DrawCircleGradient((int)e->position.x, (int)e->position.y,
                                            e->radius * 2.0f * pulse, WHITE, BLANK);
                     } else {
                         DrawCircleGradient((int)e->position.x, (int)e->position.y,
-                                           e->radius * 1.5f * pulse, e->color, BLANK);
+                                           e->radius * 1.5f * pulse, ec, BLANK);
                     }
                 }
-                DrawCircleV(e->position, e->radius, e->color);
-                DrawCircleLines((int)e->position.x, (int)e->position.y, e->radius, WHITE);
+                DrawCircleV(e->position, e->radius, ec);
+                DrawCircleLines((int)e->position.x, (int)e->position.y, e->radius,
+                                (Color){255, 255, 255, drawAlpha});
                 break;
             case ENEMY_FAST: {
-                /* Küçük yukarı bakan üçgen */
                 float r = e->radius;
                 Vector2 v1 = {e->position.x, e->position.y - r};
                 Vector2 v2 = {e->position.x - r, e->position.y + r};
                 Vector2 v3 = {e->position.x + r, e->position.y + r};
-                DrawTriangle(v1, v2, v3, e->color);
+                DrawTriangle(v1, v2, v3, ec);
                 break;
             }
             case ENEMY_TANK: {
                 float r = e->radius;
                 DrawRectangle((int)(e->position.x - r), (int)(e->position.y - r), (int)(r * 2),
-                              (int)(r * 2), e->color);
+                              (int)(r * 2), ec);
                 DrawRectangleLines((int)(e->position.x - r), (int)(e->position.y - r), (int)(r * 2),
-                                   (int)(r * 2), WHITE);
+                                   (int)(r * 2), (Color){255, 255, 255, drawAlpha});
                 break;
             }
             default:

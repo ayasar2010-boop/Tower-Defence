@@ -10,6 +10,7 @@ void DefaultSettings(Settings *s) {
     s->masterVolume = 1.0f;
     s->sfxVolume    = 1.0f;
     s->musicVolume  = 1.0f;
+    s->language     = LANG_TR;
     /* T58 — varsayilan tus atamalari */
     s->keymap[KA_PAUSE]           = KEY_P;
     s->keymap[KA_SPEED]           = KEY_F;
@@ -43,6 +44,9 @@ bool LoadSettings(Settings *s) {
             if (sscanf(line, key_pat, &ival) == 1)
                 s->keymap[i] = ival;
         }
+        /* T59 — dil */
+        if (sscanf(line, "language=%d", &ival) == 1)
+            s->language = (Language)ival;
     }
     fclose(f);
     return true;
@@ -57,6 +61,7 @@ bool SaveSettings(const Settings *s) {
     fprintf(f, "musicVolume=%.2f\n",   s->musicVolume);
     for (int i = 0; i < KA_COUNT; i++)
         fprintf(f, "keymap_%d=%d\n", i, s->keymap[i]);
+    fprintf(f, "language=%d\n", (int)s->language);
     fclose(f);
     return true;
 }

@@ -21,6 +21,7 @@ typedef struct {
     int   health, maxHealth;
     bool  isGate;
     bool  active;
+    int   tier; /* T84 — 1=odun, 2=taş, 3=güçlendirilmiş */
 } WallSegment;
 
 typedef enum { STATION_ARCHER, STATION_CANNON, STATION_CAVALRY } UnitStationType;
@@ -62,6 +63,7 @@ void InitSiegeMechanics(SiegeMechanics *s);
 void UpdateSiegeMechanics(SiegeMechanics *s, float dt);
 void DrawSiegeMechanics(SiegeMechanics *s);
 bool TryPlaceWall(SiegeMechanics *s, int gx, int gy);
+void UpgradeWallsByProsperity(SiegeMechanics *s, int prosperity);
 void SpawnBattalion(SiegeMechanics *s, Vector2 start, Vector2 target,
                     int units, float hpPerUnit, float speed);
 

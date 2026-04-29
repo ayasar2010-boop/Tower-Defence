@@ -101,7 +101,8 @@ void UpdateProjectiles(Game *g, float dt) {
                         continue;
                     float dist = Vec2Distance(p->position, g->enemies[j].position);
                     if (dist < p->splashRadius) {
-                        float dmg = p->damage * (1.0f - dist / p->splashRadius);
+                        float dmg = p->damage * (1.0f - dist / p->splashRadius)
+                                    * (1.0f - g->enemies[j].terrainArmor); /* T87 */
                         g->enemies[j].currentHp -= dmg;
                         SpawnFloatingText(g, g->enemies[j].position, dmg, false, false); /* T57 */
                     }
@@ -119,17 +120,22 @@ void UpdateProjectiles(Game *g, float dt) {
                         reward = (int)(KILL_REWARD * 1.2f);
                     if (e->type == ENEMY_TANK)
                         reward = (int)(KILL_REWARD * 2.0f);
+                    if (e->type == ENEMY_BOSS)
+                        reward = (int)(KILL_REWARD * 5.0f);
                     g->gold += reward;
                     g->score += reward * 2;
                     g->enemiesKilled++;
                     EarnProsperity(&g->homeCity, 5);
+                    /* T95 — Boss çekirdeği düşür */
+                    if (e->isBoss) g->homeCity.bossCores++;
                     e->active = false;
                     PlaySFX(&g->audio,
                             e->type == ENEMY_TANK ? SFX_TANK_DEATH : SFX_ENEMY_DEATH); /* T64 */
                 }
             } else {
-                target->currentHp -= p->damage;
-                SpawnFloatingText(g, target->position, p->damage, false, false); /* T57 */
+                float dmg = p->damage * (1.0f - target->terrainArmor); /* T87 — taşlık zırh */
+                target->currentHp -= dmg;
+                SpawnFloatingText(g, target->position, dmg, false, false); /* T57 */
                 SpawnParticles(g, p->position, p->color, 5, 80.0f, 0.2f);
                 PlaySFX(&g->audio, p->sourceType == TOWER_SNIPER ? SFX_SHOOT_SNIPER
                                                                  : SFX_SHOOT_BASIC); /* T64 */
@@ -141,10 +147,14 @@ void UpdateProjectiles(Game *g, float dt) {
                         reward = (int)(KILL_REWARD * 1.2f);
                     if (target->type == ENEMY_TANK)
                         reward = (int)(KILL_REWARD * 2.0f);
+                    if (target->type == ENEMY_BOSS)
+                        reward = (int)(KILL_REWARD * 5.0f);
                     g->gold += reward;
                     g->score += reward * 2;
                     g->enemiesKilled++;
                     EarnProsperity(&g->homeCity, 5);
+                    /* T95 — Boss çekirdeği düşür */
+                    if (target->isBoss) g->homeCity.bossCores++;
                     target->active = false;
                     PlaySFX(&g->audio, target->type == ENEMY_TANK ? SFX_TANK_DEATH
                                                                   : SFX_ENEMY_DEATH); /* T64 */

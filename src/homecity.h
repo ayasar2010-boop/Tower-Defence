@@ -24,6 +24,10 @@ typedef struct {
     int  pendingRequest;    /* ReinforcementType veya -1 */
     int  pendingCount;      /* Yerleştirilecek birim sayısı (3) */
     int  pendingGoldBonus;  /* Sonraki dalgada eklenecek altın */
+
+    /* T95 — Grand Forge */
+    int  bossCores;
+    bool pendingGrandForge; /* boss core harcandı, Mythical üretilecek */
 } HomeCity;
 
 void InitHomeCity(HomeCity *hc);
