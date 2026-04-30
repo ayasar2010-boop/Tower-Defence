@@ -64,6 +64,7 @@ typedef struct {
     int amount;
     char name[32];
     int rarity; /* T92 — ItemRarity enum: 0=Common … 4=Mythical */
+    bool isCursed; /* T99 — Lanetli eşya: güçlü bonus ama yan etki var */
 } Item;
 
 /* T91 — Paperdoll ekipman slotları */
@@ -83,6 +84,10 @@ typedef struct {
     /* T94 — Yükseltme seviyesi ve glow efekti */
     int   upgradeLevel;  /* +0 başlangıç, +3'e kadar garantili */
     float upgradeGlow;   /* başarılı upgrade sonrası glow timer */
+    /* T99 — Lanetli eşya: bonus amplifikasyonu + ceza */
+    bool  isCursed;
+    float cursePenaltyAtk;   /* negatif, ekipman takılınca uygulanır */
+    float cursePenaltySpeed; /* negatif */
 } EquippedItem;
 
 #define MAX_INVENTORY_SLOTS 12
@@ -198,7 +203,8 @@ typedef enum { DTILE_WALL = 0, DTILE_FLOOR = 1, DTILE_DOOR = 2 } DungeonTile;
 typedef enum {
     INTERACTABLE_CHEST,
     INTERACTABLE_SHRINE,
-    INTERACTABLE_WELL
+    INTERACTABLE_WELL,
+    INTERACTABLE_CARAVAN  /* T97 — Kayıp kervan arabası */
 } InteractableType;
 
 typedef struct {
@@ -230,10 +236,13 @@ typedef struct {
 void  InitHero(Hero *hero, HeroClass cls);
 void  AddHeroXP(Hero *hero, int amount);
 void  InitDungeon(DungeonMode *dungeon, Hero *hero);
-void  UpdateDungeon(DungeonMode *dungeon, Hero *hero, float dt);
+/* T97 — qm parametresi görev takibi için eklendi */
+void  UpdateDungeon(DungeonMode *dungeon, Hero *hero, void *qm, float dt);
 void  DrawDungeon(DungeonMode *dungeon, Hero *hero);
 void  UpdateHero(Hero *hero, DungeonMode *dungeon, float dt);
 void  SpawnAllies(DungeonMode *dungeon, Vector2 heroPos);
 void  ApplyEquipStats(Hero *hero, EquipSlot slot, bool equipping);
+/* T96 — TD modundan envantere item eklemek için public arayüz */
+void  DungeonInventoryAdd(Inventory *inv, const Item *item);
 
 #endif

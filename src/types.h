@@ -5,6 +5,7 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include "daycycle.h"
 #include "dungeon.h"
 #include "homecity.h"
 #include "i18n.h"
@@ -79,6 +80,39 @@ typedef enum {
     RARITY_MYTHICAL  = 4,
     RARITY_COUNT
 } ItemRarity;
+
+/* T97 — Görev (Quest) sistemi */
+#define SHRINE_KILL_RANGE 80.0f
+
+typedef enum {
+    QUEST_INACTIVE = 0,
+    QUEST_ACTIVE,
+    QUEST_COMPLETED
+} QuestState;
+
+typedef enum {
+    QUEST_CARAVAN_RESCUE = 0, /* 3 kervan arabası bul        */
+    QUEST_SHRINE_RITUAL,      /* Sunakta 15 düşman öldür     */
+    QUEST_PERFECT_DEFENSE,    /* 3 dalgayı can kaybetmeden   */
+    QUEST_TYPE_COUNT
+} QuestType;
+
+typedef struct {
+    QuestType   type;
+    QuestState  state;
+    const char *name;
+    const char *description;
+    int         progress;
+    int         target;
+} Quest;
+
+typedef struct {
+    Quest  quests[QUEST_TYPE_COUNT];
+    int    perfectWaveStreak;
+    int    livesAtWaveStart;
+    float  notifyTimer;
+    char   notifyText[64];
+} QuestManager;
 
 typedef enum {
     CELL_EMPTY = 0, CELL_PATH = 1, CELL_BUILDABLE = 2,
@@ -202,7 +236,19 @@ typedef struct {
     /* T87 — Terrain efektleri */
     bool      inTallGrass;
     float     terrainArmor; /* 0.0-1.0: hasar azaltma oranı */
+    /* T98 — Director AI: elit varyant */
+    bool      isElite;
 } Enemy;
+
+/* T98 — Director AI: performans takibi + elit zorluk */
+typedef struct {
+    float performanceScore;    /* EMA, 0.0=düşük → 1.0=çok iyi */
+    float eliteChance;         /* Mevcut dalga için 0.0–0.5 spawn şansı */
+    int   consecutiveFlawless; /* Can kaybetmeden geçilen ardışık dalga */
+    bool  eliteModeActive;
+    float waveStartTime;       /* GetTime() ile kaydedilen dalga başlangıcı */
+    int   livesAtWaveStart;    /* Director kendi snapshot'ı */
+} DirectorAI;
 
 typedef struct {
     Vector2   position;
@@ -488,6 +534,15 @@ typedef struct {
     /* T94 — Yükseltme malzemeleri */
     int ironOre;
     int magicDust;
+
+    /* T97 — Görev Yöneticisi */
+    QuestManager questManager;
+
+    /* T98 — Director AI */
+    DirectorAI director;
+
+    /* T100 — Gün/Gece döngüsü */
+    DayCycle dayCycle;
 } Game;
 
 /* ============================================================

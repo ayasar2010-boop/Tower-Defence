@@ -1,7 +1,10 @@
 ﻿#include "wave.h"
 #include "audio.h"
+#include "director.h"
+#include "dungeon.h"
 #include "enemy.h"
 #include "hud.h"
+#include "quest.h"
 #include <string.h>
 
 static void SetWave1(GameWave *w, EnemyType t, int cnt, float intv, float pre, float hpMult,
@@ -137,6 +140,10 @@ void UpdateWaves(Game *g, float dt) {
         if (w->preDelay > 0.0f)
             return;
         w->started = true;
+        /* T97 — Dalga başında can snapshot */
+        g->questManager.livesAtWaveStart = g->lives;
+        /* T98 — Director snapshot */
+        DirectorOnWaveStart(&g->director, g->lives);
         /* T62 — Dalga adı bannerını göster */
         strncpy(g->waveNameText, w->waveName, 31);
         g->waveNameTimer = 3.0f;
@@ -198,6 +205,25 @@ void UpdateWaves(Game *g, float dt) {
                 GenerateLootChest(g); /* T89 */
                 g->state = STATE_LEVEL_COMPLETE;
             } else {
+                /* T98 — Director performans güncelle */
+                DirectorOnWaveClear(&g->director, g->lives);
+                /* T97 — Kusursuz Savunma: can kaybı yoksa streak artır */
+                QuestManager *qm = &g->questManager;
+                if (g->lives >= qm->livesAtWaveStart) {
+                    qm->perfectWaveStreak++;
+                    if (QuestAdvance(qm, QUEST_PERFECT_DEFENSE, 1)) {
+                        /* Ödül: Kraliyet Destek Sandığı */
+                        Item pot = {ITEM_POTION, 3, "Kraliyet Iksiri", RARITY_EPIC};
+                        DungeonInventoryAdd(&g->dungeon.inventory, &pot);
+                        Item arm = {ITEM_GEAR,   1, "Kraliyet Zirhi", RARITY_EPIC};
+                        DungeonInventoryAdd(&g->dungeon.inventory, &arm);
+                    }
+                } else {
+                    qm->perfectWaveStreak = 0;
+                    /* QUEST_PERFECT_DEFENSE progress'i de sıfırla */
+                    if (qm->quests[QUEST_PERFECT_DEFENSE].state == QUEST_ACTIVE)
+                        qm->quests[QUEST_PERFECT_DEFENSE].progress = 0;
+                }
                 g->state = STATE_WAVE_CLEAR;
             }
         }

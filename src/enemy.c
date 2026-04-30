@@ -1,5 +1,6 @@
 ﻿#include "enemy.h"
 #include "audio.h"
+#include "director.h"
 #include "hud.h"
 #include "particle.h"
 #include "util.h"
@@ -60,6 +61,7 @@ void SpawnEnemy(Game *g, EnemyType type, float hpMult) {
             break;
         }
         e->currentHp = e->maxHp;
+        DirectorApplyElite(&g->director, e); /* T98 */
         return;
     }
 }
@@ -351,6 +353,15 @@ void UpdateEnemies(Game *g, float dt) {
                                 Fade(RED, blink));
                 DrawCircle((int)e->targetAbilityPos.x, (int)e->targetAbilityPos.y, 100.0f,
                            Fade(RED, blink * 0.3f));
+            }
+
+            /* T98 — Elite: nabız atan altın halka */
+            if (e->isElite) {
+                float pulse = 0.6f + sinf((float)GetTime() * 5.0f) * 0.4f;
+                DrawCircleLines((int)e->position.x, (int)e->position.y,
+                                e->radius + 4.0f, Fade((Color){255, 200, 30, 255}, pulse));
+                DrawCircleLines((int)e->position.x, (int)e->position.y,
+                                e->radius + 2.0f, Fade((Color){255, 150,  0, 255}, pulse * 0.7f));
             }
 
             /* HP bar — sadece hasar almışsa göster (Boss ise HUD'a havâle et) */

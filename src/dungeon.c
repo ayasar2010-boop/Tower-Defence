@@ -1,7 +1,31 @@
 #include "dungeon.h"
+#include "quest.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+
+/* T97 — Modül seviyesi QuestManager işaretçisi; UpdateDungeon'da set edilir */
+static QuestManager *s_qm = NULL;
+
+/* T97 — Her mob ölümünde sunak yakınlığı kontrol eder; tamamlanınca ödül verir */
+static void OnMobKilled(DungeonMode *dungeon, Vector2 killPos) {
+    if (!s_qm) return;
+    for (int i = 0; i < dungeon->interactableCount; i++) {
+        Interactable *itr = &dungeon->interactables[i];
+        if (itr->type != INTERACTABLE_SHRINE || !itr->active) continue;
+        float dx = killPos.x - itr->position.x;
+        float dy = killPos.y - itr->position.y;
+        if (dx*dx + dy*dy < SHRINE_KILL_RANGE * SHRINE_KILL_RANGE) {
+            /* Ödül: +%5 kalıcı hasar bonusu ve Mythical Rün — hero erişimi yok burada,
+               atk bonusu UpdateHero çerçevesinde uygulanamaz; envantere item ekleyip
+               oyuncunun kendin kullanmasını sağlarız. */
+            if (QuestAdvance(s_qm, QUEST_SHRINE_RITUAL, 1)) {
+                Item rune = {ITEM_RUNE, 1, "Mitsel Run", RARITY_MYTHICAL};
+                DungeonInventoryAdd(&dungeon->inventory, &rune);
+            }
+        }
+    }
+}
 
 /* ── Yardımcılar ──────────────────────────────────────────────────── */
 
@@ -176,14 +200,17 @@ void InitDungeon(DungeonMode *dungeon, Hero *hero) {
             Interactable *itr = &dungeon->interactables[dungeon->interactableCount++];
             itr->active = true;
             itr->used   = false;
-            itr->type   = GetRandomValue(0, 2); /* CHEST=0, SHRINE=1, WELL=2 */
+            /* T97 — %20 şansla Kervan Arabası düşer */
+            int roll = GetRandomValue(0, 4);
+            itr->type = (roll == 0) ? INTERACTABLE_CARAVAN : (InteractableType)GetRandomValue(0, 2);
             itr->position = (Vector2){
                 (float)(dungeon->rooms[i].x + dungeon->rooms[i].w / 2) * DUNGEON_TILE_SIZE,
                 (float)(dungeon->rooms[i].y + dungeon->rooms[i].h / 2) * DUNGEON_TILE_SIZE
             };
-            if (itr->type == INTERACTABLE_CHEST) strncpy(itr->tooltip, "[E] Hazine Sandigi", 31);
-            else if (itr->type == INTERACTABLE_SHRINE) strncpy(itr->tooltip, "[E] Guc Sunagi", 31);
-            else if (itr->type == INTERACTABLE_WELL) strncpy(itr->tooltip, "[E] Iyilesme Kuyusu", 31);
+            if (itr->type == INTERACTABLE_CHEST)   strncpy(itr->tooltip, "[E] Hazine Sandigi", 31);
+            else if (itr->type == INTERACTABLE_SHRINE)  strncpy(itr->tooltip, "[E] Guc Sunagi", 31);
+            else if (itr->type == INTERACTABLE_WELL)    strncpy(itr->tooltip, "[E] Iyilesme Kuyusu", 31);
+            else if (itr->type == INTERACTABLE_CARAVAN) strncpy(itr->tooltip, "[E] Yikilmis Kervan", 31);
         }
     }
 
@@ -220,6 +247,28 @@ static void AddItemToInventory(Inventory *inv, ItemType type, const char* name, 
     }
 }
 
+/* T96 — Dış modüllerden çağrılabilen public wrapper; nadirlik de yazar */
+void DungeonInventoryAdd(Inventory *inv, const Item *item) {
+    if (!inv || !item || item->type == ITEM_NONE) return;
+    /* T99 — Lanetli eşyalar asla yığılamaz; her biri ayrı slota gider */
+    if (!item->isCursed) {
+        for (int i = 0; i < MAX_INVENTORY_SLOTS; i++) {
+            if (inv->slots[i].type == item->type &&
+                !inv->slots[i].isCursed &&
+                strncmp(inv->slots[i].name, item->name, 31) == 0) {
+                inv->slots[i].amount += item->amount;
+                return;
+            }
+        }
+    }
+    for (int i = 0; i < MAX_INVENTORY_SLOTS; i++) {
+        if (inv->slots[i].type == ITEM_NONE) {
+            inv->slots[i] = *item;
+            return;
+        }
+    }
+}
+
 /* ── Hero Güncelleme ─────────────────────────────────────────────── */
 
 /* Tile geçilebilir mi kontrol eder */
@@ -244,6 +293,7 @@ static void HeroMeleeAttack(Hero *hero, DungeonMode *dungeon) {
             if (m->hp <= 0.0f) {
                 m->active = false;
                 AddHeroXP(hero, 20 + hero->level * 5);
+                OnMobKilled(dungeon, m->position); /* T97 */
             }
         }
     }
@@ -288,7 +338,7 @@ static void SkillQ(Hero *hero, DungeonMode *dungeon) {
             if (dot < 0.5f) continue;
             float dmg = hero->stats.atk * s->value;
             m->hp -= dmg;
-            if (m->hp <= 0.0f) { m->active = false; AddHeroXP(hero, 20 + hero->level * 5); }
+            if (m->hp <= 0.0f) { m->active = false; AddHeroXP(hero, 20 + hero->level * 5); OnMobKilled(dungeon, m->position); }
         }
     } else if (hero->heroClass == HERO_MAGE) {
         /* Mage Fireball: İlk hedefe hasar */
@@ -309,7 +359,7 @@ static void SkillQ(Hero *hero, DungeonMode *dungeon) {
         }
         if (target) {
             target->hp -= hero->stats.atk * s->value;
-            if (target->hp <= 0.0f) { target->active = false; AddHeroXP(hero, 20 + hero->level * 5); }
+            if (target->hp <= 0.0f) { target->active = false; AddHeroXP(hero, 20 + hero->level * 5); OnMobKilled(dungeon, target->position); }
         }
     } else if (hero->heroClass == HERO_ARCHER) {
         /* Archer Piercing Arrow: Düz çizgi boyunca herkese hasar */
@@ -325,7 +375,7 @@ static void SkillQ(Hero *hero, DungeonMode *dungeon) {
             float dot = (mx / dist) * nx + (my / dist) * ny;
             if (dot > 0.9f) {
                 m->hp -= hero->stats.atk * s->value;
-                if (m->hp <= 0.0f) { m->active = false; AddHeroXP(hero, 20 + hero->level * 5); }
+                if (m->hp <= 0.0f) { m->active = false; AddHeroXP(hero, 20 + hero->level * 5); OnMobKilled(dungeon, m->position); }
             }
         }
     }
@@ -504,8 +554,14 @@ void UpdateHero(Hero *hero, DungeonMode *dungeon, float dt) {
                     hero->stats.hp    += 20.0f;
                     hero->stats.atk   += 5.0f;
                 } else if (itr->type == INTERACTABLE_WELL) {
-                    hero->stats.hp    = hero->stats.maxHp;
-                    hero->stats.mana  = hero->stats.maxMana;
+                    hero->stats.hp   = hero->stats.maxHp;
+                    hero->stats.mana = hero->stats.maxMana;
+                } else if (itr->type == INTERACTABLE_CARAVAN && s_qm) {
+                    /* T97 — Kervan bulundu; görev tamamlandıysa Rare kılıç ödülü */
+                    if (QuestAdvance(s_qm, QUEST_CARAVAN_RESCUE, 1)) {
+                        Item reward = {ITEM_GEAR, 1, "Kervan Kilici", RARITY_RARE};
+                        DungeonInventoryAdd(&dungeon->inventory, &reward);
+                    }
                 }
                 break;
             }
@@ -599,7 +655,8 @@ void UpdateHero(Hero *hero, DungeonMode *dungeon, float dt) {
     if (hero->stats.hp <= 0.0f) { hero->alive = false; hero->state = HERO_STATE_DEAD; }
 }
 
-void UpdateDungeon(DungeonMode *dungeon, Hero *hero, float dt) {
+void UpdateDungeon(DungeonMode *dungeon, Hero *hero, void *qm, float dt) {
+    s_qm = (QuestManager *)qm; /* T97 — görev takibi için modül pointer */
     if (!dungeon->isDungeonActive) return;
 
     UpdateHero(hero, dungeon, dt);
@@ -728,9 +785,10 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
         if (!itr->active || itr->used) continue;
         
         Color ic = WHITE;
-        if (itr->type == INTERACTABLE_CHEST) ic = GOLD;
-        else if (itr->type == INTERACTABLE_SHRINE) ic = MAGENTA;
-        else if (itr->type == INTERACTABLE_WELL) ic = SKYBLUE;
+        if (itr->type == INTERACTABLE_CHEST)   ic = GOLD;
+        else if (itr->type == INTERACTABLE_SHRINE)  ic = MAGENTA;
+        else if (itr->type == INTERACTABLE_WELL)    ic = SKYBLUE;
+        else if (itr->type == INTERACTABLE_CARAVAN) ic = ORANGE; /* T97 */
 
         DrawRectangle((int)itr->position.x - 12, (int)itr->position.y - 12, 24, 24, ic);
         DrawRectangleLines((int)itr->position.x - 12, (int)itr->position.y - 12, 24, 24, RAYWHITE);
@@ -904,9 +962,19 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
                 if (it->type == ITEM_POTION) c = RED;
                 else if (it->type == ITEM_RUNE) c = PURPLE;
                 else if (it->type == ITEM_GEAR) c = LIGHTGRAY;
-                
+
+                /* T99 — Lanetli eşya: kırmızı nabız çerçeve */
+                if (it->isCursed) {
+                    float p = 0.5f + sinf((float)GetTime() * 4.0f) * 0.5f;
+                    DrawRectangleLinesEx((Rectangle){(float)sx,(float)sy,(float)slotW,(float)slotH},
+                                        2, Fade((Color){220, 30, 30, 255}, p));
+                    c = (Color){255, 80, 80, 255};
+                }
+
                 DrawCircle(sx + slotW/2, sy + slotH/2, 12, c);
                 DrawText(TextFormat("x%d", it->amount), sx + slotW - 18, sy + slotH - 14, 10, WHITE);
+                if (it->isCursed)
+                    DrawText("L", sx + 2, sy + slotH - 12, 10, (Color){220, 30, 30, 255});
             }
 
             /* Tooltip */
@@ -923,6 +991,7 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
                         if (!hero->equip[s].occupied) {
                             strncpy(hero->equip[s].name, it->name, 31);
                             hero->equip[s].rarity   = it->rarity;
+                            hero->equip[s].isCursed = it->isCursed; /* T99 */
                             hero->equip[s].occupied = true;
                             ApplyEquipStats(hero, (EquipSlot)s, true);
                             it->type = ITEM_NONE; it->amount = 0;
@@ -949,10 +1018,15 @@ void DrawDungeon(DungeonMode *dungeon, Hero *hero) {
                 int ey = pdY + row2 * 54;
                 Color sc = SLOT_COLORS[s];
                 DrawRectangle(ex, ey, 100, 46, (Color){30,30,40,200});
-                DrawRectangleLines(ex, ey, 100, 46, sc);
-                DrawText(SLOT_NAMES[s], ex + 4, ey + 3, 9, sc);
+                /* T99 — Lanetli ekipman: kırmızı slot çerçeve */
+                Color borderC = hero->equip[s].isCursed
+                    ? (Color){200, 30, 30, 255} : sc;
+                DrawRectangleLines(ex, ey, 100, 46, borderC);
+                DrawText(SLOT_NAMES[s], ex + 4, ey + 3, 9, borderC);
                 if (hero->equip[s].occupied) {
-                    DrawText(hero->equip[s].name, ex + 4, ey + 16, 10, WHITE);
+                    Color nameC = hero->equip[s].isCursed
+                        ? (Color){255, 80, 80, 255} : WHITE;
+                    DrawText(hero->equip[s].name, ex + 4, ey + 16, 10, nameC);
                     /* Tıkla → çıkar */
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
                         CheckCollisionPointRec(GetMousePosition(),
@@ -978,41 +1052,50 @@ void ApplyEquipStats(Hero *hero, EquipSlot slot, bool equipping) {
     EquippedItem *eq = &hero->equip[slot];
     float sign = equipping ? 1.0f : -1.0f;
 
-    /* Rarity'ye göre bonus hesapla */
+    /* T99 — Lanetli eşya: bonus x1.5 ama ceza uygulanır */
+    float curseMult = eq->isCursed ? 1.5f : 1.0f;
     float r = (float)(eq->rarity + 1);
+
     switch (slot) {
     case EQUIP_WEAPON:
-        eq->bonusDmg   = r * 6.0f;
-        eq->bonusDef   = 0.0f;
-        eq->bonusHp    = 0.0f;
-        eq->bonusSpeed = 0.0f;
+        eq->bonusDmg          = r * 6.0f * curseMult;
+        eq->bonusDef          = 0.0f;
+        eq->bonusHp           = 0.0f;
+        eq->bonusSpeed        = 0.0f;
+        eq->cursePenaltySpeed = eq->isCursed ? -(r * 8.0f) : 0.0f;
+        eq->cursePenaltyAtk   = 0.0f;
         break;
     case EQUIP_ARMOR:
-        eq->bonusDmg   = 0.0f;
-        eq->bonusDef   = r * 4.0f;
-        eq->bonusHp    = r * 12.0f;
-        eq->bonusSpeed = 0.0f;
+        eq->bonusDmg          = 0.0f;
+        eq->bonusDef          = r * 4.0f * curseMult;
+        eq->bonusHp           = r * 12.0f * curseMult;
+        eq->bonusSpeed        = 0.0f;
+        eq->cursePenaltyAtk   = eq->isCursed ? -(r * 5.0f) : 0.0f;
+        eq->cursePenaltySpeed = 0.0f;
         break;
     case EQUIP_HEAD:
-        eq->bonusDmg   = r * 2.0f;
-        eq->bonusDef   = r * 2.0f;
-        eq->bonusHp    = r * 8.0f;
-        eq->bonusSpeed = 0.0f;
+        eq->bonusDmg          = r * 2.0f * curseMult;
+        eq->bonusDef          = r * 2.0f * curseMult;
+        eq->bonusHp           = r * 8.0f * curseMult;
+        eq->bonusSpeed        = 0.0f;
+        eq->cursePenaltySpeed = eq->isCursed ? -(r * 4.0f) : 0.0f;
+        eq->cursePenaltyAtk   = 0.0f;
         break;
     case EQUIP_ACCESS:
-        eq->bonusDmg   = r * 2.0f;
-        eq->bonusDef   = 0.0f;
-        eq->bonusHp    = 0.0f;
-        eq->bonusSpeed = r * 4.0f;
+        eq->bonusDmg          = r * 2.0f * curseMult;
+        eq->bonusDef          = 0.0f;
+        eq->bonusHp           = 0.0f;
+        eq->bonusSpeed        = r * 4.0f * curseMult;
+        eq->cursePenaltyAtk   = eq->isCursed ? -(r * 3.0f) : 0.0f;
+        eq->cursePenaltySpeed = 0.0f;
         break;
     default: break;
     }
 
-    hero->stats.atk   += sign * eq->bonusDmg;
+    hero->stats.atk   += sign * (eq->bonusDmg   + eq->cursePenaltyAtk);
     hero->stats.def   += sign * eq->bonusDef;
     hero->stats.maxHp += sign * eq->bonusHp;
-    hero->stats.speed += sign * eq->bonusSpeed;
-    /* HP'yi maxHp ile sınırla */
+    hero->stats.speed += sign * (eq->bonusSpeed + eq->cursePenaltySpeed);
     if (hero->stats.hp > hero->stats.maxHp)
         hero->stats.hp = hero->stats.maxHp;
 }

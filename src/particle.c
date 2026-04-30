@@ -1,6 +1,8 @@
 ﻿#include "particle.h"
 #include "audio.h"
+#include "dungeon.h"
 #include "hud.h"
+#include "loot_table.h"
 #include "util.h"
 #include <math.h>
 
@@ -122,12 +124,22 @@ void UpdateProjectiles(Game *g, float dt) {
                         reward = (int)(KILL_REWARD * 2.0f);
                     if (e->type == ENEMY_BOSS)
                         reward = (int)(KILL_REWARD * 5.0f);
+                    if (e->isElite) reward *= 2;  /* T98 — Elite 2× ödül */
                     g->gold += reward;
                     g->score += reward * 2;
                     g->enemiesKilled++;
                     EarnProsperity(&g->homeCity, 5);
                     /* T95 — Boss çekirdeği düşür */
                     if (e->isBoss) g->homeCity.bossCores++;
+                    /* T96 — Ağırlıklı loot tablosundan item çek */
+                    { Item drop; if (RollLootDrop(GetLootTable(e->type), g->currentWave, &drop))
+                        DungeonInventoryAdd(&g->dungeon.inventory, &drop); }
+                    /* T99 — Elite öldürüldüğünde lanetli eşya şansı */
+                    if (e->isElite) {
+                        Item cursedDrop;
+                        if (GenerateCursedItem(e->type, g->currentWave, &cursedDrop))
+                            DungeonInventoryAdd(&g->dungeon.inventory, &cursedDrop);
+                    }
                     e->active = false;
                     PlaySFX(&g->audio,
                             e->type == ENEMY_TANK ? SFX_TANK_DEATH : SFX_ENEMY_DEATH); /* T64 */
@@ -149,12 +161,22 @@ void UpdateProjectiles(Game *g, float dt) {
                         reward = (int)(KILL_REWARD * 2.0f);
                     if (target->type == ENEMY_BOSS)
                         reward = (int)(KILL_REWARD * 5.0f);
+                    if (target->isElite) reward *= 2;  /* T98 — Elite 2× ödül */
                     g->gold += reward;
                     g->score += reward * 2;
                     g->enemiesKilled++;
                     EarnProsperity(&g->homeCity, 5);
                     /* T95 — Boss çekirdeği düşür */
                     if (target->isBoss) g->homeCity.bossCores++;
+                    /* T96 — Ağırlıklı loot tablosundan item çek */
+                    { Item drop; if (RollLootDrop(GetLootTable(target->type), g->currentWave, &drop))
+                        DungeonInventoryAdd(&g->dungeon.inventory, &drop); }
+                    /* T99 — Elite öldürüldüğünde lanetli eşya şansı */
+                    if (target->isElite) {
+                        Item cursedDrop;
+                        if (GenerateCursedItem(target->type, g->currentWave, &cursedDrop))
+                            DungeonInventoryAdd(&g->dungeon.inventory, &cursedDrop);
+                    }
                     target->active = false;
                     PlaySFX(&g->audio, target->type == ENEMY_TANK ? SFX_TANK_DEATH
                                                                   : SFX_ENEMY_DEATH); /* T64 */

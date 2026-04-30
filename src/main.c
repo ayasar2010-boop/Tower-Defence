@@ -13,6 +13,8 @@
 #include "map.h"
 #include "particle.h"
 #include "projectile.h"
+#include "director.h"
+#include "quest.h"
 #include "tower.h"
 #include "types.h"
 #include "ui.h"
@@ -306,6 +308,9 @@ void InitGame(Game *g) {
     InitSiegeMechanics(&g->siege);
     InitManagers(&g->managers);
     InitGuardians(g);
+    InitQuestManager(&g->questManager); /* T97 */
+    InitDirector(&g->director, STARTING_LIVES); /* T98 */
+    InitDayCycle(&g->dayCycle, 120.0f); /* T100 — 120 saniye = 1 tam gün */
     LoadSettings(&g->settings); /* T57 — settings.ini'den oku, yoksa varsayılan */
     I18nLoad(g->settings.language);  /* T59 — dil dosyasını yükle */
     g->selectedBuilding = BUILDING_BARRACKS;
@@ -1057,6 +1062,8 @@ void UpdateMenu(Game * g) {
                     UpdateScreenShake(&game, rawDt);
                     UpdateGameCamera(&game, rawDt);
                     UpdateFogOfWar(&game); /* T70 */
+                    UpdateQuestNotify(&game.questManager, dt); /* T97 */
+                    UpdateDayCycle(&game.dayCycle, dt);        /* T100 */
                     UpdateWaves(&game, dt);
                     UpdateHomeCity(&game.homeCity, dt);
                     HandleGrandForge(&game);
@@ -1120,7 +1127,8 @@ void UpdateMenu(Game * g) {
                     }
                     break;
                 case STATE_DUNGEON:
-                    UpdateDungeon(&game.dungeon, &game.hero, dt);
+                    UpdateDungeon(&game.dungeon, &game.hero, &game.questManager, dt);
+                    UpdateQuestNotify(&game.questManager, dt); /* T97 */
                     /* ESC: dungeon'dan çık, altın bonus uygula */
                     if (IsKeyPressed(KEY_ESCAPE)) {
                         game.gold += game.dungeon.inventory.bonusGold;
@@ -1178,18 +1186,32 @@ void UpdateMenu(Game * g) {
                     BeginMode2D(renderCam);
                     DrawGame(&game);
                     EndMode2D();
+                    DrawDayNightOverlay(&game.dayCycle); /* T100 — gece/gündüz katmanı */
                     DrawHUD(&game);
                     DrawMinimap(&game); /* T70 — Minimap (ekran koordinatı) */
-                    DrawContextMenu(
-                        &game); /* Menü Artık Ekran Koordinatlarında (HUD Katmanı) Çiziliyor! */
+                    DrawContextMenu(&game);
+                    DrawQuestHUD(&game.questManager);    /* T97 */
+                    DrawDirectorStatus(&game.director);  /* T98 */
+                    DrawDayCycleHUD(&game.dayCycle);     /* T100 — üst HUD */
+                    /* T99 — Lanetli eşya vinyette efekti */
+                    { bool anyCursed = false;
+                      for (int s = 0; s < EQUIP_SLOT_COUNT; s++)
+                          if (game.hero.equip[s].isCursed && game.hero.equip[s].occupied) { anyCursed = true; break; }
+                      if (anyCursed) {
+                          float pulse = 0.3f + sinf((float)GetTime() * 2.0f) * 0.15f;
+                          DrawRectangleLinesEx((Rectangle){0,0,SCREEN_WIDTH,SCREEN_HEIGHT}, 20, Fade(RED, pulse));
+                      } }
                     break;
                 }
                 case STATE_WAVE_CLEAR: {
                     BeginMode2D(game.camera.cam);
                     DrawGame(&game);
                     EndMode2D();
+                    DrawDayNightOverlay(&game.dayCycle); /* T100 */
                     DrawHUD(&game);
                     DrawMinimap(&game);
+                    DrawQuestHUD(&game.questManager); /* T97 */
+                    DrawDayCycleHUD(&game.dayCycle);  /* T100 */
                     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, (Color){0, 0, 0, 100});
                     const char *wc = "DALGA TEMIZLENDI!";
                     DrawText(wc, SCREEN_WIDTH / 2 - MeasureText(wc, 40) / 2, SCREEN_HEIGHT / 2 - 60,
@@ -1206,6 +1228,17 @@ void UpdateMenu(Game * g) {
                 case STATE_DUNGEON:
                     ClearBackground((Color){15, 10, 8, 255});
                     DrawDungeon(&game.dungeon, &game.hero);
+                    DrawDayNightOverlay(&game.dayCycle); /* T100 */
+                    DrawQuestHUD(&game.questManager); /* T97 */
+                    DrawDayCycleHUD(&game.dayCycle);  /* T100 */
+                    /* T99 — Lanetli eşya vinyette efekti */
+                    { bool anyCursed = false;
+                      for (int s = 0; s < EQUIP_SLOT_COUNT; s++)
+                          if (game.hero.equip[s].isCursed && game.hero.equip[s].occupied) { anyCursed = true; break; }
+                      if (anyCursed) {
+                          float pulse = 0.3f + sinf((float)GetTime() * 2.0f) * 0.15f;
+                          DrawRectangleLinesEx((Rectangle){0,0,SCREEN_WIDTH,SCREEN_HEIGHT}, 20, Fade(RED, pulse));
+                      } }
                     break;
                 case STATE_LEVEL_COMPLETE:
                     DrawLevelComplete(&game);

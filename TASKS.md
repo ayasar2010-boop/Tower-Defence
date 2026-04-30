@@ -213,13 +213,13 @@
 # 🟣 POST-MVP (1.2+ sürümleri)
 
 ## AŞAMA 22 — Görevler ve Director AI
-- [ ] **T96** — **Weighted Loot Tables:** Her düşman + Boss için `dropChance` + `dropWeight`.
-- [ ] **T97** — **QuestManager:** Dinamik yan görevler. Senaryolar için → LORE.md.
-- [ ] **T98** — **Director AI:** Performans takibi (can/altın/temizleme süresi). Flawless oynayana Elite düşmanlar.
-- [ ] **T99** — **Cursed Loot:** Çift taraflı eşyalar. Vignette/aura efekti. **Bağımlılık:** T98 olmadan etkisiz, → T98.
+- [x] **T96** — **Weighted Loot Tables:** Her düşman + Boss için `dropChance` + `dropWeight`.
+- [x] **T97** — **QuestManager:** Dinamik yan görevler. Senaryolar için → LORE.md.
+- [x] **T98** — **Director AI:** Performans takibi (can/altın/temizleme süresi). Flawless oynayana Elite düşmanlar.
+- [x] **T99** — **Cursed Loot:** Çift taraflı eşyalar. Vignette/aura efekti. **Bağımlılık:** T98 olmadan etkisiz, → T98.
 
 ## AŞAMA 23 — Yaşayan Evren
-- [ ] **T100** — **Living Time:** Sürekli zaman akışı + Day/Night cycle.
+- [x] **T100** — **Living Time:** Sürekli zaman akışı + Day/Night cycle.
 - [ ] **T101** — **Diegetic UI:** Dungeon Entrance binası, Courier Post (atlı ulak).
 - [ ] **T102** — **Background Defense Sim:** Kümülatif `totalTowerDPS`/`totalSoldierCount`. 10s snapshot. Snap-back. Kritik uyarı.
 - [ ] **T103** — **İzometrik Zindanlar:** Top-down → İzometrik. Özel canavar yetenekleri (ışınlanma, zehir bulutu, skill blok).
